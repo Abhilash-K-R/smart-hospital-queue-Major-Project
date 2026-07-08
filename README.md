@@ -20,8 +20,8 @@ AI-based system that predicts hospital wait times, sends "leave now" alerts base
 | Layer      | Tech                                   |
 |------------|-----------------------------------------|
 | Frontend   | React / Next.js                         |
-| Backend    | Node.js or Python (Flask/FastAPI)       |
-| Database   | MySQL / PostgreSQL / MongoDB            |
+| Backend    | Node.js + Express                       |
+| Database   | MongoDB (Atlas)                         |
 | ML         | Python, scikit-learn (Random Forest)    |
 | Maps       | Google Maps Distance Matrix API         |
 | Hosting    | Render / Vercel / Railway (free tier)   |
@@ -168,6 +168,34 @@ End of each sprint = demo checkpoint. Show what's actually working, even if roug
 - Set up Google Maps API billing/key in Week 1 — don't leave it for later.
 
 ---
+## Progress log (PROGRESS.md) — required for every teammate
+
+Each person maintains a detailed `PROGRESS.md` inside their own folder (`backend/PROGRESS.md`, `ml-model/PROGRESS.md`, `patient-app/PROGRESS.md`, `staff-dashboard/PROGRESS.md`). This is a step-by-step record of what you did, why, and how — so if something breaks later, anyone on the team (or our guide) can trace exactly what was done and by whom.
+
+### When to update it
+Every time you finish a meaningful chunk of work — a working API, a fixed bug, a completed screen — before you commit and push.
+
+### How to generate it
+After finishing your work for the session, paste this prompt to Claude (or any AI tool you're using), filling in your own summary of what you did:
+
+I just finished working on [describe what you built/fixed today, e.g. "the ML model training script and synthetic dataset generator"].
+Here's what I did, in order:
+[paste your rough steps, commands you ran, problems you hit, how you fixed them]
+Write this up as a detailed PROGRESS.md entry — steps taken, why each decision was made, any errors hit and how they were debugged, and what's next. Same style as a technical changelog, so a teammate with no context can understand exactly what was done.
+
+Then:
+1. Copy the AI's output into your `[your-folder]/PROGRESS.md`
+2. Commit and push:
+```powershell
+   git add .
+   git commit -m "Add progress log for [what you built]"
+   git push
+```
+
+### Why this matters
+- If a feature breaks weeks later, you can trace back exactly which decision caused it
+- Your guide can see real engineering process, not just final code — this matters for evaluation
+- Teammates don't need to ask "how does this work" — it's already written down
 
 ## Known fix needed from Phase 1
 
