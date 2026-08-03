@@ -32,10 +32,10 @@ AI-based system that predicts hospital wait times, sends "leave now" alerts base
 
 | Role                    | Owner   | Branch name        | Folder              |
 |--------------------------|---------|----------------------|----------------------|
-| Database + backend APIs  | [name]  | `backend-dev`        | `backend/`           |
-| ML model + dataset       | [name]  | `ml-model`            | `ml-model/`           |
-| Patient app frontend     | [name]  | `patient-app`         | `patient-app/`         |
-| Staff dashboard + Maps   | [name]  | `staff-dashboard`     | `staff-dashboard/`     |
+| Database + backend APIs  | [Anjanadri]  | `backend-dev`        | `backend/`           |
+| ML model + dataset       | [Abhilash]  | `ml-model`            | `ml-model/`           |
+| Patient app frontend     | [Laxuman]  | `patient-app`         | `patient-app/`         |
+| Staff dashboard + Maps   | [Naveen]  | `staff-dashboard`     | `staff-dashboard/`     |
 
 Each person works **only inside their own folder**, on **only their own branch**. This means nobody can accidentally overwrite someone else's work.
 
