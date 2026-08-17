@@ -19,9 +19,9 @@ AI-based system that predicts hospital wait times, sends "leave now" alerts base
 
 | Layer      | Tech                                   |
 |------------|-----------------------------------------|
-| Frontend   | React / Next.js                         |
-| Backend    | Node.js + Express                       |
-| Database   | MongoDB (Atlas)                         |
+| Frontend   | React + Tailwind CSS                    |
+| Backend    | Python + FastAPI                        |
+| Database   | PostgreSQL (Supabase/Neon) via SQLAlchemy|
 | ML         | Python, scikit-learn (Random Forest)    |
 | Maps       | Google Maps Distance Matrix API         |
 | Hosting    | Render / Vercel / Railway (free tier)   |
