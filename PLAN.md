@@ -7,6 +7,7 @@
 **Status:** Paper written and submission-ready. Product build starting from scratch — nothing built yet.
  
 ---
+
  
 ## Current Tech Stack (final, replaces old Node/MongoDB plan)
  
