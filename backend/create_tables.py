@@ -1,5 +1,5 @@
 """
-create_tables.py
+backend/create_tables.py
 -------------
 One-time script that reads every model defined in models.py and creates
 the actual tables inside our Neon PostgreSQL database.
