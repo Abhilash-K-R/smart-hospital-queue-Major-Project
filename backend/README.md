@@ -15,13 +15,17 @@ A local copy of our backend that:
 
 ---
 
----
-
 ## Current Project Status
 
 - ✅ **Phase 0 — Environment Setup:** Complete. FastAPI skeleton runs locally, connects to Neon successfully.
 - ✅ **Phase 1 — Database Design:** Complete. All 7 tables created in Neon (`department`, `doctor`, `patient`, `symptommapping`, `staffuser`, `appointment`, `queuelog`) via `create_tables.py`, verified with real sample data via `seed.py`.
-- 🔄 **Phase 2 — Backend Core APIs:** In progress (Auth → Doctors/Departments → Symptom mapping → Appointments → Queue status).
+- ✅ **Phase 2 — Backend Core APIs:** Complete. All 5 planned endpoint groups built and tested via `/docs`:
+  - Auth — `/signup/patient`, `/login/patient` (JWT-based, bcrypt password hashing)
+  - Doctors/Departments — `GET /departments`, `GET /doctors` (with optional `department_id` filter)
+  - Symptom mapping — `GET /symptom-mapping`, `PUT /symptom-mapping/{id}`
+  - Appointments — `POST /appointments`, `GET /appointments/my`
+  - Queue status — `GET /appointments/{id}/queue-status`
+- 🔄 **Phase 3 — ML Model:** Not started. Next up — Random Forest wait-time prediction using `queue_length_ahead` as the primary feature.
 
 See `PROGRESS.md` in this folder for detailed session-by-session logs.
 
@@ -90,7 +94,7 @@ You'll know it worked when you see `(venv)` at the start of your terminal line. 
 ## Step 5 — Install project dependencies
 
 ```powershell
-pip install fastapi uvicorn sqlmodel python-dotenv psycopg2-binary
+pip install fastapi uvicorn sqlmodel python-dotenv psycopg2-binary python-jose[cryptography] passlib[bcrypt]
 ```
 
 This installs:
@@ -99,6 +103,14 @@ This installs:
 - **sqlmodel** — lets us define database tables as Python classes
 - **python-dotenv** — reads secret config (like passwords) safely
 - **psycopg2-binary** — lets Python talk to PostgreSQL
+- **python-jose[cryptography]** — creates and verifies JWT login tokens
+- **passlib[bcrypt]** — securely hashes passwords
+
+**Known issue:** newer versions of `bcrypt` (5.x) break `passlib`. If `/signup/patient` fails with a `500` error, run:
+```powershell
+pip uninstall bcrypt -y
+pip install bcrypt==4.0.1
+```
 
 ---
 
@@ -120,6 +132,7 @@ Inside the `backend/` folder, create a new file named exactly `.env` (starts wit
 Paste in:
 ```
 DATABASE_URL=postgresql://neondb_owner:PASSWORD@ep-something.neon.tech/neondb?sslmode=require
+JWT_SECRET_KEY=ask_abhilash_for_the_shared_secret_key
 ```
 
 Save it. This file is already excluded from git via `.gitignore` — **never remove `.env` from `.gitignore`, and never commit this file.**
@@ -133,7 +146,6 @@ Make sure `(venv)` is showing in your terminal, then run:
 uvicorn main:app --reload
 ```
 
-
 You should see a line like `Uvicorn running on http://127.0.0.1:8000`.
 
 Open your browser and go to:
@@ -141,8 +153,6 @@ Open your browser and go to:
 - `http://localhost:8000/docs` → FastAPI's interactive testing page — you'll use this constantly
 
 If `db_configured` shows `false`, double check your `.env` file — it likely means the connection string wasn't saved correctly.
-
----
 
 ---
 
@@ -159,6 +169,36 @@ To view live data visually, use DBeaver connected to the same Neon connection st
 
 ---
 
+## Available API Endpoints (Phase 2)
+
+All endpoints are testable interactively at `http://localhost:8000/docs`.
+
+| Method | Endpoint | Auth required? | Purpose |
+|---|---|---|---|
+| GET | `/` | No | Health check |
+| POST | `/signup/patient` | No | Create a new patient account |
+| POST | `/login/patient` | No | Log in, returns a JWT access token |
+| GET | `/departments` | No | List all hospital departments |
+| GET | `/doctors` | No | List all doctors, optional `?department_id=` filter |
+| GET | `/symptom-mapping` | No | List symptom → department mappings |
+| PUT | `/symptom-mapping/{id}` | No *(flagged — needs staff-only lock before deployment)* | Edit a symptom mapping |
+| POST | `/appointments` | Yes | Book an appointment as the logged-in patient |
+| GET | `/appointments/my` | Yes | List the logged-in patient's own appointments |
+| GET | `/appointments/{id}/queue-status` | Yes | Get live queue position for one of your own appointments |
+
+### How to call a protected endpoint
+
+1. Call `/login/patient` with valid credentials, copy the `access_token` from the response
+2. On `/docs`, click **Authorize** (top right), paste the token, click Authorize
+3. Now any "Yes" (auth required) endpoint above will work
+
+If building the actual frontend (not testing via `/docs`), attach the token to every protected request as a header:
+```
+Authorization: Bearer <token>
+```
+
+---
+
 ## Common errors and fixes
 
 | Error | Fix |
@@ -168,6 +208,8 @@ To view live data visually, use DBeaver connected to the same Neon connection st
 | `ModuleNotFoundError: No module named 'fastapi'` | You forgot to activate `venv` — run `venv\Scripts\activate` first |
 | Git push fails with "no upstream branch" | Run `git push --set-upstream origin your-branch-name` once |
 | `git rm` says "pathspec did not match" | Git paths are relative to the **repo root**, not your current folder — check where you are with `git status` |
+| `/signup/patient` returns `500` | bcrypt version conflict — run `pip uninstall bcrypt -y` then `pip install bcrypt==4.0.1` |
+| Swagger's Authorize popup gives `422 Unprocessable Content` | Make sure you're on the latest `auth.py` using `HTTPBearer`, not `OAuth2PasswordBearer` — the token box should just ask for a plain token paste, not a username/password form |
 
 ---
 
@@ -181,10 +223,10 @@ venv\Scripts\activate
 git pull origin main
 ```
 
-Do your work, then:
+Do your work, then commit with file names specified (not `git add .` unless many files changed):
 ```powershell
-git add .
-git commit -m "short description of what you did"
+git add file1.py file2.py
+git commit -m "Phase X: short description of what you did (file1.py, file2.py)"
 git push
 ```
 
@@ -196,5 +238,5 @@ Then open a Pull Request on GitHub when a feature is ready — see the main repo
 
 - Always activate `venv` before running anything Python-related in this project
 - Never commit `.env` — it holds real credentials
-- Update `PROGRESS.md` in your folder after every session
-- Ask for help early — don't stay stuck silently    
+- Update both `PROGRESS.md` and this `README.md` at the end of every phase, and commit them together
+- Ask for help early — don't stay stuck silently
