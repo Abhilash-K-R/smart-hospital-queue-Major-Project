@@ -78,3 +78,23 @@ class DoctorResponse(BaseModel):
     name: str
     department_id: int
     avg_consult_minutes: int
+    
+# ---------------------------------------------------------------------
+# SYMPTOM MAPPING
+# ---------------------------------------------------------------------
+
+class SymptomMappingResponse(BaseModel):
+    """What we send back when listing symptom-to-department mappings."""
+    id: int
+    symptom_name: str
+    department_id: int
+
+
+class SymptomMappingUpdateRequest(BaseModel):
+    """
+    What staff sends to update a mapping — e.g. moving 'stomach pain'
+    from General Medicine to Gastroenterology if the hospital adds
+    that department later.
+    """
+    symptom_name: str
+    department_id: int

@@ -16,11 +16,13 @@ from sqlmodel import Session, select
 from dotenv import load_dotenv
 import os
 
-from models import Patient, Department, Doctor
+from models import Patient, Department, Doctor, SymptomMapping
 from schemas import (
     PatientSignupRequest, PatientResponse, LoginRequest, TokenResponse,
     DepartmentResponse, DoctorResponse,
+    SymptomMappingResponse, SymptomMappingUpdateRequest,
 )
+
 from typing import List
 
 from database import engine
@@ -126,3 +128,44 @@ def list_doctors(department_id: int = None):
             query = query.where(Doctor.department_id == department_id)
         doctors = session.exec(query).all()
         return doctors
+# ---------------------------------------------------------------------
+# SYMPTOM MAPPING
+# ---------------------------------------------------------------------
+
+@app.get("/symptom-mapping", response_model=List[SymptomMappingResponse])
+def list_symptom_mapping():
+    """
+    Returns every symptom-to-department mapping.
+    The patient app uses this to know which department to route to
+    when a patient selects a symptom like 'chest pain'.
+    """
+    with Session(engine) as session:
+        mappings = session.exec(select(SymptomMapping)).all()
+        return mappings
+
+
+@app.put("/symptom-mapping/{mapping_id}", response_model=SymptomMappingResponse)
+def update_symptom_mapping(mapping_id: int, request: SymptomMappingUpdateRequest):
+    """
+    Updates an existing symptom-to-department mapping.
+    Used by staff dashboard when a hospital's department structure changes.
+
+    NOTE: This currently has NO auth check — anyone can call it.
+    We will lock this down to staff-only once we add role-based
+    protection in a later cleanup pass. Flagging this now so it's
+    not forgotten before final deployment.
+    """
+    with Session(engine) as session:
+        mapping = session.get(SymptomMapping, mapping_id)
+
+        if not mapping:
+            raise HTTPException(status_code=404, detail="Symptom mapping not found")
+
+        mapping.symptom_name = request.symptom_name
+        mapping.department_id = request.department_id
+
+        session.add(mapping)
+        session.commit()
+        session.refresh(mapping)
+
+        return mapping
