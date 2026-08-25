@@ -16,9 +16,16 @@ from sqlmodel import Session, select
 from dotenv import load_dotenv
 import os
 
+from models import Patient, Department, Doctor
+from schemas import (
+    PatientSignupRequest, PatientResponse, LoginRequest, TokenResponse,
+    DepartmentResponse, DoctorResponse,
+)
+from typing import List
+
 from database import engine
-from models import Patient
-from schemas import PatientSignupRequest, PatientResponse, LoginRequest, TokenResponse
+# from models import Patient
+# from schemas import PatientSignupRequest, PatientResponse, LoginRequest, TokenResponse
 from auth import hash_password, verify_password, create_access_token
 
 load_dotenv()
@@ -87,3 +94,35 @@ def login_patient(request: LoginRequest):
 
         token = create_access_token(data={"sub": str(patient.id), "role": "patient"})
         return TokenResponse(access_token=token)
+# ---------------------------------------------------------------------
+# DEPARTMENTS & DOCTORS
+# ---------------------------------------------------------------------
+
+@app.get("/departments", response_model=List[DepartmentResponse])
+def list_departments():
+    """
+    Returns every department. Used by the patient app's symptom-selection
+    flow to know which departments exist, and by the staff dashboard
+    when editing the symptom-to-department mapping.
+    """
+    with Session(engine) as session:
+        departments = session.exec(select(Department)).all()
+        return departments
+
+
+@app.get("/doctors", response_model=List[DoctorResponse])
+def list_doctors(department_id: int = None):
+    """
+    Returns doctors, optionally filtered by department.
+    Example: GET /doctors?department_id=1 → only doctors in department 1.
+    Called without a query param, GET /doctors → returns ALL doctors.
+
+    This filtering is how the patient app shows "all doctors under the
+    matched department" after a patient picks a symptom.
+    """
+    with Session(engine) as session:
+        query = select(Doctor)
+        if department_id is not None:
+            query = query.where(Doctor.department_id == department_id)
+        doctors = session.exec(query).all()
+        return doctors

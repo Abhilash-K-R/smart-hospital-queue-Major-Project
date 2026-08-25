@@ -56,3 +56,25 @@ class TokenResponse(BaseModel):
     """What we send back after a successful login — the JWT access pass."""
     access_token: str
     token_type: str = "bearer"  # standard JWT convention, tells the client how to use the token
+    
+    
+# ---------------------------------------------------------------------
+# DEPARTMENTS & DOCTORS
+# ---------------------------------------------------------------------
+
+class DepartmentResponse(BaseModel):
+    """What we send back when listing departments."""
+    id: int
+    name: str
+
+
+class DoctorResponse(BaseModel):
+    """
+    What we send back when listing doctors.
+    Includes department_id so the frontend knows which department
+    this doctor belongs to, without needing a second lookup.
+    """
+    id: int
+    name: str
+    department_id: int
+    avg_consult_minutes: int
