@@ -40,3 +40,40 @@
 - Phase 1 complete — all 7 tables confirmed with real data in Neon, gate condition met.
 - Handing off to Phase 2: Backend Core APIs (owned by Abhilash). Build order: Auth (JWT) → Doctors/Departments endpoints → Symptom mapping → Appointments → Queue status.
 - Note carried over: staff accounts must be pre-seeded, no public signup endpoint for staff (already respected in seed.py — StaffUser inserted directly, not via any API).
+
+## Phase 2 — Backend Core APIs (in progress)
+**Date:** 25 August 2026
+**Branch:** dev-abhi
+
+### What was done
+1. Installed python-jose[cryptography] and passlib[bcrypt] for JWT auth and password hashing.
+2. Added JWT_SECRET_KEY to .env.
+3. Created auth.py — password hashing (bcrypt), JWT creation/verification (HS256, 60-min expiry), and get_current_user dependency for protecting routes.
+4. Created schemas.py — Pydantic request/response models, kept separate from models.py so sensitive fields (e.g. password_hash) never leak into API responses.
+5. Built /signup/patient and /login/patient endpoints in main.py — tested successfully via /docs.
+6. Built GET /departments and GET /doctors (with optional department_id filter) — tested successfully.
+7. Built GET /symptom-mapping and PUT /symptom-mapping/{id} — tested successfully.
+
+### Known gaps — flagged, not yet fixed
+- **PUT /symptom-mapping/{id} currently has NO auth check.** Any caller can edit the symptom-to-department mapping right now, not just staff. This must be locked down with role-based protection (staff-only) before final deployment. Flagged in code comment, tracked here so it isn't forgotten.
+- Route protection so far only checks "is this a valid logged-in user," not "does this user have the right ROLE" (patient vs staff). Role-based checks need to be added as a follow-up once more staff-only routes exist (e.g. emergency insertion in Phase 6).
+
+### What's next
+- Appointments endpoints (POST /appointments, GET /appointments/my) — using get_current_user so patients can only book/view their own appointments.
+- Then queue status endpoint to complete Phase 2's build order.
+
+### Update — Phase 2 continued (26 August 2026)
+1. Fixed a passlib/bcrypt version mismatch causing signup to fail with 500 — downgraded bcrypt to 4.0.1 (newer bcrypt 5.x removed an attribute passlib 1.7.4 depends on).
+2. Fixed Swagger's Authorize popup failing with 422 — switched auth.py from OAuth2PasswordBearer (expects form-encoded username/password) to HTTPBearer (expects a simple pasted token), matching our actual JSON-based login flow.
+3. Built and tested POST /appointments and GET /appointments/my — booking is tied to the logged-in patient's token, not a client-supplied patient_id, preventing a patient from booking on someone else's behalf.
+4. Built and tested GET /appointments/{id}/queue-status — returns live count of pending patients ahead in the same doctor's queue. Includes an ownership check (403 if a patient tries to view another patient's appointment status).
+
+### Phase 2 — COMPLETE
+All 5 planned endpoints built and verified via /docs: Auth, Doctors/Departments, Symptom mapping, Appointments, Queue status.
+
+### Known gaps carried forward
+- PUT /symptom-mapping/{id} still has no role-based auth check — any logged-in-or-not caller can currently edit it. Needs staff-only protection before Phase 6 (staff dashboard) goes live.
+- No role-based (patient vs staff) distinction enforced anywhere yet — get_current_user only confirms "valid token," not "correct role for this action."
+
+### What's next
+- Phase 3: ML model (Random Forest wait-time prediction) — can now use queue-status logic as its live queue_length_ahead feature.
