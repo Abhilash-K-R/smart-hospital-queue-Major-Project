@@ -22,6 +22,7 @@ from schemas import (
     DepartmentResponse, DoctorResponse,
     SymptomMappingResponse, SymptomMappingUpdateRequest,
     AppointmentCreateRequest, AppointmentResponse,
+    QueueStatusResponse,
 )
 from auth import hash_password, verify_password, create_access_token, get_current_user
 from datetime import datetime
@@ -235,3 +236,54 @@ def get_my_appointments(current_user: dict = Depends(get_current_user)):
             select(Appointment).where(Appointment.patient_id == patient_id)
         ).all()
         return appointments
+    
+# ---------------------------------------------------------------------
+# QUEUE STATUS
+# ---------------------------------------------------------------------
+
+@app.get("/appointments/{appointment_id}/queue-status", response_model=QueueStatusResponse)
+def get_queue_status(
+    appointment_id: int,
+    current_user: dict = Depends(get_current_user),
+):
+    """
+    Returns how many patients are currently ahead of this specific
+    appointment, for the SAME doctor, that are still 'pending'
+    (i.e. haven't been seen yet).
+
+    This is the live number the patient app polls to show
+    "3 patients ahead of you" — and it's also what Phase 3's ML model
+    will use as its main predictive feature (queue_length_ahead had
+    the highest importance in our paper's results, ~0.52).
+    """
+    patient_id = int(current_user["sub"])
+
+    with Session(engine) as session:
+        appointment = session.get(Appointment, appointment_id)
+
+        if not appointment:
+            raise HTTPException(status_code=404, detail="Appointment not found")
+
+        # Security check: a patient can only view their OWN queue status,
+        # not anyone else's, even if they guess a valid appointment_id.
+        if appointment.patient_id != patient_id:
+            raise HTTPException(status_code=403, detail="Not your appointment")
+
+        # Count pending appointments for the same doctor, booked BEFORE
+        # this one — that's how many people are genuinely ahead in line.
+        patients_ahead = len(
+            session.exec(
+                select(Appointment).where(
+                    Appointment.doctor_id == appointment.doctor_id,
+                    Appointment.status == "pending",
+                    Appointment.queue_position < appointment.queue_position,
+                )
+            ).all()
+        )
+
+        return QueueStatusResponse(
+            appointment_id=appointment.id,
+            doctor_id=appointment.doctor_id,
+            queue_position=appointment.queue_position,
+            patients_ahead=patients_ahead,
+        )

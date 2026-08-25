@@ -123,3 +123,14 @@ class AppointmentResponse(BaseModel):
     booked_time: datetime
     status: str
     queue_position: int | None
+    
+# ---------------------------------------------------------------------
+# QUEUE STATUS
+# ---------------------------------------------------------------------
+
+class QueueStatusResponse(BaseModel):
+    """What we send back when a patient checks their live queue position."""
+    appointment_id: int
+    doctor_id: int
+    queue_position: int
+    patients_ahead: int
