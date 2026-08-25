@@ -90,15 +90,19 @@ def verify_access_token(token: str) -> Optional[dict]:
 # ---------------------------------------------------------------------
 
 from fastapi import Depends, HTTPException, status
-from fastapi.security import OAuth2PasswordBearer
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 
-# This tells FastAPI: "expect a token in the Authorization header,
-# formatted as 'Bearer <token>'". tokenUrl is just for the /docs page's
-# 'Authorize' button — it doesn't affect logic.
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="login/patient")
+# HTTPBearer gives a simple "paste your token" box in Swagger's Authorize
+# popup, instead of OAuth2PasswordBearer's username/password form (which
+# expects form-encoded data, not our JSON login response). Since we issue
+# our own tokens via a JSON /login endpoint rather than a standard OAuth2
+# token endpoint, HTTPBearer matches our actual flow better.
+security_scheme = HTTPBearer()
 
 
-def get_current_user(token: str = Depends(oauth2_scheme)) -> dict:
+def get_current_user(
+    credentials: HTTPAuthorizationCredentials = Depends(security_scheme),
+) -> dict:
     """
     Reusable dependency. Add `current_user: dict = Depends(get_current_user)`
     as a parameter to ANY route, and FastAPI will automatically:
@@ -110,6 +114,7 @@ def get_current_user(token: str = Depends(oauth2_scheme)) -> dict:
     This means we write the "check if logged in" logic ONCE here,
     instead of repeating it in every single protected endpoint.
     """
+    token = credentials.credentials  # the raw token string, without "Bearer " prefix
     payload = verify_access_token(token)
     if payload is None:
         raise HTTPException(

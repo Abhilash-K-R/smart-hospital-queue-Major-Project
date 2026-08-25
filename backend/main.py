@@ -11,17 +11,20 @@ Currently implemented:
 Owner: Abhilash (Phase 2)
 """
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Depends
 from sqlmodel import Session, select
 from dotenv import load_dotenv
 import os
 
-from models import Patient, Department, Doctor, SymptomMapping
+from models import Patient, Department, Doctor, SymptomMapping, Appointment
 from schemas import (
     PatientSignupRequest, PatientResponse, LoginRequest, TokenResponse,
     DepartmentResponse, DoctorResponse,
     SymptomMappingResponse, SymptomMappingUpdateRequest,
+    AppointmentCreateRequest, AppointmentResponse,
 )
+from auth import hash_password, verify_password, create_access_token, get_current_user
+from datetime import datetime
 
 from typing import List
 
@@ -169,3 +172,66 @@ def update_symptom_mapping(mapping_id: int, request: SymptomMappingUpdateRequest
         session.refresh(mapping)
 
         return mapping
+    
+# ---------------------------------------------------------------------
+# APPOINTMENTS
+# ---------------------------------------------------------------------
+
+@app.post("/appointments", response_model=AppointmentResponse)
+def create_appointment(
+    request: AppointmentCreateRequest,
+    current_user: dict = Depends(get_current_user),
+):
+    """
+    Books a new appointment for the LOGGED-IN patient.
+    current_user["sub"] holds the patient's id, extracted from their JWT
+    token — this is what stops a patient from booking on someone else's
+    behalf by just changing a number in the request.
+    """
+    patient_id = int(current_user["sub"])
+
+    with Session(engine) as session:
+        # Confirm the doctor actually exists before booking against them
+        doctor = session.get(Doctor, request.doctor_id)
+        if not doctor:
+            raise HTTPException(status_code=404, detail="Doctor not found")
+
+        # Count how many patients are already waiting for this doctor,
+        # so we know this patient's position in line.
+        existing_count = len(
+            session.exec(
+                select(Appointment).where(
+                    Appointment.doctor_id == request.doctor_id,
+                    Appointment.status == "pending",
+                )
+            ).all()
+        )
+
+        new_appointment = Appointment(
+            patient_id=patient_id,
+            doctor_id=request.doctor_id,
+            booked_time=datetime.utcnow(),
+            status="pending",
+            queue_position=existing_count + 1,
+        )
+        session.add(new_appointment)
+        session.commit()
+        session.refresh(new_appointment)
+
+        return new_appointment
+
+
+@app.get("/appointments/my", response_model=List[AppointmentResponse])
+def get_my_appointments(current_user: dict = Depends(get_current_user)):
+    """
+    Returns only the LOGGED-IN patient's own appointments — never
+    another patient's, since patient_id comes from the token, not
+    from the request.
+    """
+    patient_id = int(current_user["sub"])
+
+    with Session(engine) as session:
+        appointments = session.exec(
+            select(Appointment).where(Appointment.patient_id == patient_id)
+        ).all()
+        return appointments

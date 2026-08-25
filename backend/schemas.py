@@ -98,3 +98,28 @@ class SymptomMappingUpdateRequest(BaseModel):
     """
     symptom_name: str
     department_id: int
+    
+# ---------------------------------------------------------------------
+# APPOINTMENTS
+# ---------------------------------------------------------------------
+
+from datetime import datetime
+
+
+class AppointmentCreateRequest(BaseModel):
+    """
+    What the patient app sends to book an appointment.
+    Notice: NO patient_id here — we get that from the logged-in user's
+    token instead, so a patient can only ever book for themselves.
+    """
+    doctor_id: int
+
+
+class AppointmentResponse(BaseModel):
+    """What we send back after booking, or when listing a patient's appointments."""
+    id: int
+    patient_id: int
+    doctor_id: int
+    booked_time: datetime
+    status: str
+    queue_position: int | None
