@@ -84,3 +84,37 @@ def verify_access_token(token: str) -> Optional[dict]:
         return payload
     except JWTError:
         return None
+    
+# ---------------------------------------------------------------------
+# ROUTE PROTECTION — use this to guard endpoints that require login
+# ---------------------------------------------------------------------
+
+from fastapi import Depends, HTTPException, status
+from fastapi.security import OAuth2PasswordBearer
+
+# This tells FastAPI: "expect a token in the Authorization header,
+# formatted as 'Bearer <token>'". tokenUrl is just for the /docs page's
+# 'Authorize' button — it doesn't affect logic.
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="login/patient")
+
+
+def get_current_user(token: str = Depends(oauth2_scheme)) -> dict:
+    """
+    Reusable dependency. Add `current_user: dict = Depends(get_current_user)`
+    as a parameter to ANY route, and FastAPI will automatically:
+      1. Extract the token from the request's Authorization header
+      2. Verify it using verify_access_token()
+      3. Reject the request with 401 if invalid/expired
+      4. Otherwise, hand back the token's data (patient id + role) to your route
+
+    This means we write the "check if logged in" logic ONCE here,
+    instead of repeating it in every single protected endpoint.
+    """
+    payload = verify_access_token(token)
+    if payload is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or expired token",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    return payload
