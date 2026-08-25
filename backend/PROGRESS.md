@@ -21,3 +21,22 @@
 
 ### What's next
 - Phase 1: define database schema using SQLModel (patients, doctors, departments, symptom_mapping, appointments, queue_logs, staff_users) and create the tables for real in the Neon database.
+
+## Phase 1 — Database Design
+**Date:** 25 August 2026
+**Branch:** dev-abhi
+
+### What was done
+1. Created `database.py` — sets up a single shared SQLAlchemy/SQLModel `engine` object, reading DATABASE_URL from `.env` via python-dotenv. `echo=True` enabled temporarily to print raw SQL to terminal for learning/debugging purposes.
+2. Created `models.py` — defined all 7 tables as SQLModel classes: Department, Doctor, Patient, SymptomMapping, StaffUser, Appointment, QueueLog. Added docstrings and inline comments explaining each field and relationship for teammate readability. Confirmed `symptom_mapping` has its own `id` primary key (not just a composite key), per the requirement flagged for Phase 2.
+3. Created `create_tables.py` — one-time script that imports all models and runs `SQLModel.metadata.create_all(engine)` to create tables for real inside Neon. Ran successfully — confirmed via terminal SQL logs and visually in DBeaver that all 7 tables now exist with correct columns and foreign key constraints (doctor→department, symptommapping→department, appointment→patient/doctor, queuelog→appointment).
+4. Created `seed.py` — inserts one sample row into each table, in dependency order (parent tables before child tables that reference them via foreign key) to avoid foreign key violations. Order used: Department → Doctor → Patient → SymptomMapping → StaffUser → Appointment → QueueLog.
+5. Ran `seed.py` successfully — confirmed real rows exist in all 7 tables via DBeaver's "View Data" panel.
+
+### Errors hit & fixes
+- None blocking. Noted a `DeprecationWarning` for `datetime.utcnow()` in `seed.py` (Python flags this as scheduled for removal in favor of timezone-aware `datetime.now(datetime.UTC)`). Non-blocking — flagged for a future cleanup pass, not fixed yet since it doesn't affect functionality.
+
+### What's next
+- Phase 1 complete — all 7 tables confirmed with real data in Neon, gate condition met.
+- Handing off to Phase 2: Backend Core APIs (owned by Abhilash). Build order: Auth (JWT) → Doctors/Departments endpoints → Symptom mapping → Appointments → Queue status.
+- Note carried over: staff accounts must be pre-seeded, no public signup endpoint for staff (already respected in seed.py — StaffUser inserted directly, not via any API).

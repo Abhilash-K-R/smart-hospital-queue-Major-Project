@@ -15,6 +15,18 @@ A local copy of our backend that:
 
 ---
 
+---
+
+## Current Project Status
+
+- ✅ **Phase 0 — Environment Setup:** Complete. FastAPI skeleton runs locally, connects to Neon successfully.
+- ✅ **Phase 1 — Database Design:** Complete. All 7 tables created in Neon (`department`, `doctor`, `patient`, `symptommapping`, `staffuser`, `appointment`, `queuelog`) via `create_tables.py`, verified with real sample data via `seed.py`.
+- 🔄 **Phase 2 — Backend Core APIs:** In progress (Auth → Doctors/Departments → Symptom mapping → Appointments → Queue status).
+
+See `PROGRESS.md` in this folder for detailed session-by-session logs.
+
+---
+
 ## Step 1 — Install the tools (one-time, do this first)
 
 | Tool | Why | Download |
@@ -121,6 +133,7 @@ Make sure `(venv)` is showing in your terminal, then run:
 uvicorn main:app --reload
 ```
 
+
 You should see a line like `Uvicorn running on http://127.0.0.1:8000`.
 
 Open your browser and go to:
@@ -128,6 +141,21 @@ Open your browser and go to:
 - `http://localhost:8000/docs` → FastAPI's interactive testing page — you'll use this constantly
 
 If `db_configured` shows `false`, double check your `.env` file — it likely means the connection string wasn't saved correctly.
+
+---
+
+---
+
+## Working with the database (Phase 1 onward)
+
+Once your server is running, our database tables already exist in Neon (shared across the team — you don't need to create them yourself). Key files:
+
+- `database.py` — sets up the shared connection to Neon. Don't duplicate this in other files, just import `engine` from here.
+- `models.py` — defines all 7 tables as Python classes. If you need to see the database structure, read this file first.
+- `create_tables.py` — already run once by Abhilash. You do NOT need to run this again unless models.py changes with a new table.
+- `seed.py` — inserts sample test data. Safe to re-run for testing, but note it will create duplicate rows each time (no duplicate-checking yet).
+
+To view live data visually, use DBeaver connected to the same Neon connection string in your `.env`.
 
 ---
 
