@@ -25,7 +25,8 @@ A local copy of our backend that:
   - Symptom mapping — `GET /symptom-mapping`, `PUT /symptom-mapping/{id}`
   - Appointments — `POST /appointments`, `GET /appointments/my`
   - Queue status — `GET /appointments/{id}/queue-status`
-- 🔄 **Phase 3 — ML Model:** Not started. Next up — Random Forest wait-time prediction using `queue_length_ahead` as the primary feature.
+- - ✅ **Phase 3 — ML Model:** Complete. Random Forest wait-time prediction model trained (200 estimators, max depth 10) and wired into FastAPI as `POST /predict-wait`. Matches paper's core finding — Random Forest significantly outperforms Linear Regression baseline. Model files (`wait_time_model.pkl`, `model_columns.pkl`) committed directly to `backend/`.
+- 🔄 **Phase 4 — Google Maps + Notifications:** Not started.
 
 See `PROGRESS.md` in this folder for detailed session-by-session logs.
 
@@ -169,7 +170,7 @@ To view live data visually, use DBeaver connected to the same Neon connection st
 
 ---
 
-## Available API Endpoints (Phase 2)
+## Available API Endpoints (Phase 3)
 
 All endpoints are testable interactively at `http://localhost:8000/docs`.
 
@@ -185,6 +186,7 @@ All endpoints are testable interactively at `http://localhost:8000/docs`.
 | POST | `/appointments` | Yes | Book an appointment as the logged-in patient |
 | GET | `/appointments/my` | Yes | List the logged-in patient's own appointments |
 | GET | `/appointments/{id}/queue-status` | Yes | Get live queue position for one of your own appointments |
+| POST | `/predict-wait` | No | Get predicted wait time (range + explanation) from the ML model — currently accepts manual test input, will later pull live data automatically |
 
 ### How to call a protected endpoint
 

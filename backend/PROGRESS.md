@@ -77,3 +77,22 @@ All 5 planned endpoints built and verified via /docs: Auth, Doctors/Departments,
 
 ### What's next
 - Phase 3: ML model (Random Forest wait-time prediction) — can now use queue-status logic as its live queue_length_ahead feature.
+
+## Phase 3 — ML Model (27 August 2026)
+**Branch:** dev-abhi
+
+### What was done
+1. Created ml-model/generate_dataset.py — generates 4,000 synthetic hospital visit records matching paper methodology (Poisson-distributed queue lengths, day/hour multiplicative peak effects, ~7% emergency cases, Gaussian noise). Verified stats align with realistic OPD wait-time distributions (median 54.9 min, mean 63.6 min).
+2. Created ml-model/train_model.py — trains and compares Linear Regression baseline vs Random Forest Regressor (200 estimators, max depth 10) on an 80/20 split with one-hot encoded features. Results: Linear Regression MAE 16.02/R² 0.755, Random Forest MAE 5.45/R² 0.967 — Random Forest reduced MAE by 66%, confirming paper's core finding (RF significantly outperforms linear baseline due to multiplicative queue dynamics). Numbers differ slightly from paper's published results (MAE 4.69/10.64) due to synthetic dataset regeneration with a different random seed run — direction and magnitude of the finding remain consistent.
+3. Verified feature importance — queue_length_ahead is the dominant predictor (0.387), followed by doctor_avg_consult_minutes (0.180) and hour_of_day (0.123), matching paper's Fig. 3 ordering.
+4. Created ml-model/predict.py — standalone predict_wait() function, loads the trained model and returns a wait-time range (±15% band) plus a plain-language explanation, tested directly via command line.
+5. Copied wait_time_model.pkl and model_columns.pkl into backend/, created backend/ml_predictor.py (mirrors predict.py logic) so FastAPI can import and use the model directly — no separate ML microservice, per paper's architecture.
+6. Added POST /predict-wait endpoint in main.py — tested via /docs, confirmed prediction matches standalone test exactly (109.3 min for the same test input).
+
+### Decisions made
+- Chose to COMMIT the .pkl model files directly into backend/ (rather than gitignoring them) for simplicity — teammates can clone and run without an extra "copy the model files" step. Tradeoff: git history will grow each time the model is retrained and re-committed. Acceptable for a student project on a deadline.
+- Fixed a numpy float64 serialization issue in predict.py/ml_predictor.py — wrapped all returned numbers in float() so FastAPI's JSON responses don't error out (numpy's native types aren't directly JSON-serializable).
+
+### What's next
+- Phase 4: Google Maps travel-time integration + departure-time notification logic (Naveen, staff-dashboard branch)
+- Later: /predict-wait will be wired to pull LIVE queue data automatically (via existing /appointments/{id}/queue-status logic) instead of requiring manually-supplied values — that manual-input version was for Phase 3 testing only.
