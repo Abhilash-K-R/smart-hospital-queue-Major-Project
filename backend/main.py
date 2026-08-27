@@ -24,6 +24,9 @@ from schemas import (
     AppointmentCreateRequest, AppointmentResponse,
     QueueStatusResponse,
 )
+
+from ml_predictor import predict_wait
+from schemas import PredictWaitRequest, PredictWaitResponse
 from auth import hash_password, verify_password, create_access_token, get_current_user
 from datetime import datetime
 
@@ -287,3 +290,27 @@ def get_queue_status(
             queue_position=appointment.queue_position,
             patients_ahead=patients_ahead,
         )
+        
+# ---------------------------------------------------------------------
+# ML WAIT-TIME PREDICTION
+# ---------------------------------------------------------------------
+
+@app.post("/predict-wait", response_model=PredictWaitResponse)
+def get_wait_prediction(request: PredictWaitRequest):
+    """
+    Returns a predicted wait-time range + explanation using our trained
+    Random Forest model. This is a standalone test endpoint for Phase 3 —
+    later this logic will be triggered automatically when a patient
+    checks their queue status, using real live data instead of
+    manually-supplied values.
+    """
+    result = predict_wait(
+        doctor_id=request.doctor_id,
+        department=request.department,
+        doctor_avg_consult_minutes=request.doctor_avg_consult_minutes,
+        day_of_week=request.day_of_week,
+        hour_of_day=request.hour_of_day,
+        queue_length_ahead=request.queue_length_ahead,
+        patient_type=request.patient_type,
+    )
+    return result

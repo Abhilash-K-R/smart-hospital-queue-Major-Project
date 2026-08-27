@@ -134,3 +134,29 @@ class QueueStatusResponse(BaseModel):
     doctor_id: int
     queue_position: int
     patients_ahead: int
+    
+# ---------------------------------------------------------------------
+# WAIT-TIME PREDICTION (ML)
+# ---------------------------------------------------------------------
+
+class PredictWaitRequest(BaseModel):
+    """
+    What's needed to predict a wait time. In Phase 3 we're testing this
+    standalone; later (Phase 4+) most of these values will be looked up
+    automatically from the doctor/appointment records instead of the
+    client having to supply them manually.
+    """
+    doctor_id: str
+    department: str
+    doctor_avg_consult_minutes: int
+    day_of_week: str
+    hour_of_day: int
+    queue_length_ahead: int
+    patient_type: str
+
+
+class PredictWaitResponse(BaseModel):
+    predicted_minutes: float
+    range_low: float
+    range_high: float
+    explanation: str
