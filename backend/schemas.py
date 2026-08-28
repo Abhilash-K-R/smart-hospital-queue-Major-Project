@@ -160,3 +160,40 @@ class PredictWaitResponse(BaseModel):
     range_low: float
     range_high: float
     explanation: str
+
+
+# ---------------------------------------------------------------------
+# DEPARTURE TIME & GEOLOCATION CALCULATION (Phase 4)
+# ---------------------------------------------------------------------
+
+class CalculateDepartureRequest(BaseModel):
+    """
+    Payload sent by the patient application or queue tracker.
+    Contains the appointment ID and current live GPS coordinates of the patient.
+    """
+    appointment_id: int
+    patient_latitude: float
+    patient_longitude: float
+    buffer_minutes: int = 15  # Recommended arrival buffer before consultation
+
+
+class CalculateDepartureResponse(BaseModel):
+    """
+    Full breakdown returned to the patient with queue status, ML prediction,
+    traffic-aware travel time from Google Maps, and smart departure alert.
+    """
+    appointment_id: int
+    doctor_id: int
+    doctor_name: str
+    department_name: str
+    queue_position: int
+    patients_ahead: int
+    estimated_wait_minutes: float
+    travel_duration_minutes: float
+    travel_distance_km: float
+    traffic_duration_source: str  # "google_maps" or "haversine_fallback"
+    buffer_minutes: int
+    minutes_until_departure: float
+    should_leave_now: bool
+    departure_status: str  # "relax_at_home" | "get_ready" | "leave_now"
+    message: str

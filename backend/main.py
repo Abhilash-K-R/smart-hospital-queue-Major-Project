@@ -12,9 +12,12 @@ Owner: Abhilash (Phase 2)
 """
 
 from fastapi import FastAPI, HTTPException, Depends
+from fastapi.middleware.cors import CORSMiddleware
 from sqlmodel import Session, select
 from dotenv import load_dotenv
 import os
+from datetime import datetime
+from typing import List
 
 from models import Patient, Department, Doctor, SymptomMapping, Appointment
 from schemas import (
@@ -23,26 +26,31 @@ from schemas import (
     SymptomMappingResponse, SymptomMappingUpdateRequest,
     AppointmentCreateRequest, AppointmentResponse,
     QueueStatusResponse,
+    PredictWaitRequest, PredictWaitResponse,
+    CalculateDepartureRequest, CalculateDepartureResponse,
 )
 
 from ml_predictor import predict_wait
-from schemas import PredictWaitRequest, PredictWaitResponse
 from auth import hash_password, verify_password, create_access_token, get_current_user
-from datetime import datetime
-
-from typing import List
-
 from database import engine
-# from models import Patient
-# from schemas import PatientSignupRequest, PatientResponse, LoginRequest, TokenResponse
-from auth import hash_password, verify_password, create_access_token
+from services.maps_service import get_travel_time
 
 load_dotenv()
 
-app = FastAPI()
+app = FastAPI(title="Smart Hospital Queue & Arrival Optimization API", version="1.0.0")
+
+# Enable Cross-Origin Resource Sharing (CORS) for frontends (Patient App & Staff Dashboard)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 
 @app.get("/")
+
 def read_root():
     return {"status": "alive", "db_configured": os.getenv("DATABASE_URL") is not None}
 
@@ -314,3 +322,119 @@ def get_wait_prediction(request: PredictWaitRequest):
         patient_type=request.patient_type,
     )
     return result
+
+
+# ---------------------------------------------------------------------
+# GOOGLE MAPS + SMART DEPARTURE CALCULATION (Phase 4)
+# ---------------------------------------------------------------------
+
+@app.post("/calculate-departure", response_model=CalculateDepartureResponse)
+async def calculate_departure(request: CalculateDepartureRequest):
+    """
+    Dynamically computes optimal patient departure time by orchestrating:
+      1. Live hospital queue status (patients ahead in line)
+      2. ML-driven wait time prediction (Random Forest)
+      3. Google Maps Distance Matrix API (real-time traffic travel duration)
+      4. Arrival buffer margin (default 15 minutes)
+
+    Formula:
+      Minutes Until Departure = max(0, Estimated Wait - (Travel Duration + Buffer))
+      Should Leave Now = (Minutes Until Departure <= 5)
+    """
+    with Session(engine) as session:
+        appointment = session.get(Appointment, request.appointment_id)
+        if not appointment:
+            raise HTTPException(status_code=404, detail="Appointment not found")
+
+        doctor = session.get(Doctor, appointment.doctor_id)
+        if not doctor:
+            raise HTTPException(status_code=404, detail="Assigned doctor not found")
+
+        department = session.get(Department, doctor.department_id)
+        department_name = department.name if department else "General Medicine"
+        doctor_name = doctor.name
+
+        # Count pending appointments booked ahead of this one for the same doctor
+        pending_ahead = session.exec(
+            select(Appointment).where(
+                Appointment.doctor_id == appointment.doctor_id,
+                Appointment.status == "pending",
+                Appointment.queue_position < appointment.queue_position,
+            )
+        ).all()
+        patients_ahead = len(pending_ahead)
+
+    # ML Wait-Time Prediction
+    now = datetime.utcnow()
+    day_name = now.strftime("%A")
+    hour_val = now.hour
+    doc_code = f"DOC{doctor.id}" if doctor.id <= 6 else "DOC1"
+
+    try:
+        ml_prediction = predict_wait(
+            doctor_id=doc_code,
+            department=department_name,
+            doctor_avg_consult_minutes=doctor.avg_consult_minutes,
+            day_of_week=day_name,
+            hour_of_day=hour_val,
+            queue_length_ahead=patients_ahead,
+            patient_type="normal",
+        )
+        estimated_wait = float(ml_prediction["predicted_minutes"])
+    except Exception:
+        # Fallback to deterministic estimate if ML model throws unexpected format
+        estimated_wait = float(max(5.0, patients_ahead * doctor.avg_consult_minutes))
+
+    # Google Maps Travel Duration
+    travel_data = await get_travel_time(
+        origin_lat=request.patient_latitude,
+        origin_lng=request.patient_longitude,
+    )
+    travel_duration = float(travel_data["travel_duration_minutes"])
+    travel_dist = float(travel_data["travel_distance_km"])
+    data_source = travel_data["source"]
+
+    # Departure Countdown Math
+    buffer_min = max(0, request.buffer_minutes)
+    total_required_lead_time = travel_duration + buffer_min
+    minutes_until_departure = max(0.0, round(estimated_wait - total_required_lead_time, 1))
+
+    # Departure Status and Smart Message
+    should_leave_now = minutes_until_departure <= 5.0
+
+    if should_leave_now or minutes_until_departure == 0.0:
+        departure_status = "leave_now"
+        message = (
+            f"🚨 Leave now! With {travel_duration}m travel time and a {buffer_min}m hospital arrival buffer, "
+            f"leaving now ensures you arrive right on time for Dr. {doctor_name}."
+        )
+    elif minutes_until_departure <= 15.0:
+        departure_status = "get_ready"
+        message = (
+            f"⚠️ Get ready to head out! Estimated departure in ~{int(minutes_until_departure)} minutes "
+            f"({patients_ahead} patient(s) currently ahead in line)."
+        )
+    else:
+        departure_status = "relax_at_home"
+        message = (
+            f"✅ Relax at home! You have about {int(minutes_until_departure)} minutes before you need to leave. "
+            f"Predicted wait is {int(estimated_wait)}m with {patients_ahead} patient(s) ahead."
+        )
+
+    return CalculateDepartureResponse(
+        appointment_id=appointment.id,
+        doctor_id=doctor.id,
+        doctor_name=doctor_name,
+        department_name=department_name,
+        queue_position=appointment.queue_position or 1,
+        patients_ahead=patients_ahead,
+        estimated_wait_minutes=estimated_wait,
+        travel_duration_minutes=travel_duration,
+        travel_distance_km=travel_dist,
+        traffic_duration_source=data_source,
+        buffer_minutes=buffer_min,
+        minutes_until_departure=minutes_until_departure,
+        should_leave_now=should_leave_now,
+        departure_status=departure_status,
+        message=message,
+    )
