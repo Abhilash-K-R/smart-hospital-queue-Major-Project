@@ -1,0 +1,8 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Adding a custom background color for the entire dashboard */
+body {
+  @apply bg-gray-50 text-gray-900 antialiased;
+}
