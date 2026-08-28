@@ -48,3 +48,52 @@ Here is exactly what I did, in order, so anyone on the team can reproduce or und
 - **Authentication:** We need to write the actual logic inside `Login.jsx` to talk to our backend API, verify credentials, and store a "token" so the `<ProtectedRoute>` knows the user is logged in.
 - **API Connection:** We need to use `axios` to start pulling real data from the backend into our `Dashboard` and `Queue` pages.
 - **UI Polish:** We will begin styling the individual pages using Tailwind to match our design mockups.
+
+---
+
+## Phase 4 — Patient App & Google Maps / GPS Live Departure Tracking
+**Date:** 28 August 2026  
+**Branch:** `staff-dashboard-naveen`  
+**Owner:** Naveen
+
+### What was built/fixed today
+I developed and integrated the **Patient App (`patient-app`)** with live queue tracking, browser GPS geolocation, and intelligent departure time calculation powered by Google Maps and travel-time services.
+
+Patients can now track their position in the hospital queue in real-time, view dynamic wait predictions (from the Phase 3 ML model), and receive intelligent departure recommendations based on their live distance and traffic conditions.
+
+### Step-by-Step Detailed Breakdown
+
+1. **Patient App Bootstrapping & Styling Setup:**
+   - Initialized a modern React Single Page Application in `patient-app/` using Vite, Tailwind CSS, PostCSS, and Lucide React icons.
+   - Configured custom theme tokens with smooth slate and teal healthcare palettes, clean typography (Plus Jakarta Sans), and responsive mobile-first layouts.
+   - Fixed standard HTML5 void element syntax in `patient-app/index.html` (standardizing `<meta>` and `<link>` tags for strict validator/linter compatibility).
+
+2. **Browser Geolocation & Tracking Service (`src/services/location.js`):**
+   - Built a robust Geolocation service interfacing with the HTML5 `navigator.geolocation` API.
+   - Added `checkLocationPermission()` to inspect browser permissions (`granted`, `prompt`, `denied`).
+   - Created `getCurrentCoordinates()` with `enableHighAccuracy: true` and comprehensive error handling (denied permissions, timeout, device unavailable).
+   - Added `watchPatientPosition()` for continuous real-time coordinate streaming.
+   - Provided fallback reference coordinates for SIET Hospital Tumakuru (`13.340881, 77.100601`) and demo coordinates for local testing without physical travel.
+
+3. **API Client & Backend Communication (`src/services/api.js`):**
+   - Set up Axios client with request interceptors for automatic JWT authentication token attachment.
+   - Created endpoint service helpers:
+     - `calculateDeparture()`: Sends appointment ID and live GPS coordinates to calculate optimal leave time.
+     - `getQueueStatus()`: Fetches real-time queue length, current token being served, and estimated consultation time.
+     - `getDepartments()` and `getDoctors()`: Fetches hospital directory data.
+
+4. **Live Queue & Departure Tracker Component (`src/components/QueueTracker.jsx`):**
+   - Built an interactive UI displaying:
+     - **Queue status cards:** Live Token Number, Current Serving Token, Patients Ahead, Estimated Wait Time.
+     - **Smart Departure Advisor:** Compares current time with estimated consultation time minus travel time and buffer, giving clear indicators (e.g., *"Leave Now"*, *"Leave in 15 mins"*, or *"You have arrived"*).
+     - **Travel & Traffic Details:** Distance in km, driving duration with traffic, and navigation route link to Google Maps.
+     - **Live Location Status Banner:** Visual badge showing GPS lock status and accuracy.
+
+### Decisions & Design Rationale
+- **Why high-accuracy GPS with fallback?** Real-time GPS gives accurate ETAs, but mobile browsers or testing environments can block geolocation. Providing clear permission status and mock coordinates ensures the app works smoothly in both testing and production.
+- **Why dynamic departure calculation?** Hospital queues are unpredictable. If the queue moves faster or an emergency causes a delay, calculating the departure time dynamically based on `(Consultation ETA - Travel Duration - Buffer)` prevents patients from waiting idly in crowded waiting rooms.
+
+### What's Next
+- Wire the frontend departure calculation directly to backend's live FastAPI Google Distance Matrix route.
+- Implement Push Notifications / SMS alerts when the calculated departure threshold is reached.
+- Connect staff queue management actions (calling next token, emergency insertion) so the patient view updates instantly via WebSockets or polling.
