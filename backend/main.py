@@ -11,22 +11,29 @@ Currently implemented:
 Owner: Abhilash (Phase 2)
 """
 
+# Hospital's fixed location — later this could come from a Hospital table,
+# but for our single-hospital scope, a constant is sufficient.
+HOSPITAL_LAT = 13.376230
+HOSPITAL_LNG = 77.097439
+
 from fastapi import FastAPI, HTTPException, Depends
 from sqlmodel import Session, select
 from dotenv import load_dotenv
 import os
 
+from travel_time import get_travel_time_minutes
 from models import Patient, Department, Doctor, SymptomMapping, Appointment
 from schemas import (
     PatientSignupRequest, PatientResponse, LoginRequest, TokenResponse,
     DepartmentResponse, DoctorResponse,
     SymptomMappingResponse, SymptomMappingUpdateRequest,
     AppointmentCreateRequest, AppointmentResponse,
-    QueueStatusResponse,
+    QueueStatusResponse, 
+    PredictWaitRequest, PredictWaitResponse,
+    DepartureCheckRequest, DepartureCheckResponse,
 )
 
 from ml_predictor import predict_wait
-from schemas import PredictWaitRequest, PredictWaitResponse
 from auth import hash_password, verify_password, create_access_token, get_current_user
 from datetime import datetime
 
@@ -35,7 +42,7 @@ from typing import List
 from database import engine
 # from models import Patient
 # from schemas import PatientSignupRequest, PatientResponse, LoginRequest, TokenResponse
-from auth import hash_password, verify_password, create_access_token
+# from auth import hash_password, verify_password, create_access_token
 
 load_dotenv()
 
@@ -314,3 +321,81 @@ def get_wait_prediction(request: PredictWaitRequest):
         patient_type=request.patient_type,
     )
     return result
+
+# ---------------------------------------------------------------------
+# DEPARTURE-TIME NOTIFICATION LOGIC
+# ---------------------------------------------------------------------
+
+@app.post("/departure-check", response_model=DepartureCheckResponse)
+def check_departure_time(
+    request: DepartureCheckRequest,
+    current_user: dict = Depends(get_current_user),
+):
+    """
+    The core "leave now" decision logic (paper Section 4.4).
+
+    Compares the patient's PREDICTED WAIT TIME against their CURRENT
+    TRAVEL TIME to the hospital. A notification is triggered once the
+    remaining wait roughly equals the travel time — so the patient
+    arrives close to their turn, not significantly early or late.
+    """
+    patient_id = int(current_user["sub"])
+
+    with Session(engine) as session:
+        appointment = session.get(Appointment, request.appointment_id)
+
+        if not appointment:
+            raise HTTPException(status_code=404, detail="Appointment not found")
+        if appointment.patient_id != patient_id:
+            raise HTTPException(status_code=403, detail="Not your appointment")
+
+        doctor = session.get(Doctor, appointment.doctor_id)
+
+        # Count real-time patients ahead, same logic as queue-status endpoint
+        patients_ahead = len(
+            session.exec(
+                select(Appointment).where(
+                    Appointment.doctor_id == appointment.doctor_id,
+                    Appointment.status == "pending",
+                    Appointment.queue_position < appointment.queue_position,
+                )
+            ).all()
+        )
+
+        # Use today's actual day/hour so the ML prediction reflects
+        # right now, not a hardcoded test value
+        now = datetime.utcnow()
+        day_name = now.strftime("%A")
+
+        prediction = predict_wait(
+            doctor_id=doctor.id,
+            department="",  # not strictly needed for prediction quality here — model handles missing category via reindex
+            doctor_avg_consult_minutes=doctor.avg_consult_minutes,
+            day_of_week=day_name,
+            hour_of_day=now.hour,
+            queue_length_ahead=patients_ahead,
+            patient_type="normal",
+        )
+        predicted_wait = prediction["predicted_minutes"]
+
+        travel_time = get_travel_time_minutes(
+            request.patient_lat, request.patient_lng, HOSPITAL_LAT, HOSPITAL_LNG
+        )
+
+        # The core trigger condition: leave now if travel time is close to
+        # or exceeds the remaining predicted wait — meaning if you don't
+        # leave now, you risk arriving late for your turn.
+        should_leave = travel_time >= predicted_wait
+
+        if should_leave:
+            message = f"Leave now! Your predicted wait is {predicted_wait} min and travel takes {travel_time} min."
+        else:
+            buffer = predicted_wait - travel_time
+            message = f"Not yet — you can wait {buffer:.0f} more minutes before leaving."
+
+        return DepartureCheckResponse(
+            predicted_wait_minutes=predicted_wait,
+            travel_time_minutes=travel_time,
+            should_leave_now=should_leave,
+            message=message,
+        )

@@ -160,3 +160,23 @@ class PredictWaitResponse(BaseModel):
     range_low: float
     range_high: float
     explanation: str
+    
+# ---------------------------------------------------------------------
+# DEPARTURE-TIME NOTIFICATION
+# ---------------------------------------------------------------------
+
+class DepartureCheckRequest(BaseModel):
+    """
+    What the patient app sends to check if it's time to leave.
+    Combines their live location with their appointment's predicted wait.
+    """
+    appointment_id: int
+    patient_lat: float
+    patient_lng: float
+
+
+class DepartureCheckResponse(BaseModel):
+    predicted_wait_minutes: float
+    travel_time_minutes: int
+    should_leave_now: bool
+    message: str
