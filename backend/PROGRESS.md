@@ -119,5 +119,34 @@ All 5 planned endpoints built and verified via /docs: Auth, Doctors/Departments,
 - Fixed `doctor_id` formatting (`f"DOC{doctor.id}"`) and department query in `/departure-check` so predictions match the model's trained one-hot dummy features.
 
 ### What's next
-- Phase 5: Integration with Laxuman's patient app frontend (test running patient-app connected to the live backend).
-- Phase 6: Staff dashboard queue control and emergency insertion.
+- Phase 5: Staff dashboard queue control and emergency insertion (Phase 6 features).
+
+## Phase 4 Completion & Frontend Bridge Integration (10 September 2026)
+**Branch:** dev-abhi
+
+### What was done
+1. **Option A Live Backend Verification:**
+   - Ran `POST /departure-check` over live HTTP (`http://127.0.0.1:8000`) with real appointment data.
+   - Nearby test (~500m): predicted wait 130.4m, travel time 3m, `should_leave_now: false`.
+   - Distant test (~70km in Bangalore): predicted wait 130.4m, travel time 194m, `should_leave_now: true`.
+2. **Git Hygiene & Clean Merge:**
+   - Deleted inaccurate premature `v0.4.0` tag locally and from remote origin.
+   - Cleanly merged `origin/laxuman-frontend` into `dev-abhi`.
+   - Added comprehensive `patient-app/.gitignore` and purged cached `node_modules/` and `dist/` from Git tracking (`git rm -r --cached`).
+3. **5 Frontend Bridge Connections Applied:**
+   - **Base URL:** Added `.env` with `VITE_API_BASE_URL=http://localhost:8000` and updated fallback in `patient-app/src/services/api.js`.
+   - **Token Persistence:** Updated `patientService.login` & `patientService.registerPatient` to store `mediflow_auth_token` in `localStorage`.
+   - **Real Login Call:** Hooked `Login.jsx` to call `patientService.login()` on form submit.
+   - **Live Departure Engine:** Rewrote `ArrivalPrediction.jsx` to call `queueService.checkDeparture()` (`POST /departure-check`), displaying real countdown, dynamic "LEAVE NOW!" alerts, travel durations, and hospital route to SIET Tumakuru.
+   - **Queue Auto-Refresh Sync:** Connected `QueueContext.jsx` 30-second interval to `queueService.getQueueStatus()` so live token progression is synchronized from the database.
+   - **Safe Token Parsing:** Fixed token rendering and progress calculations in `QueueCard.jsx` and `ProgressCard.jsx` to prevent `NaN%` display when receiving formatted tokens.
+4. **End-to-End Live Verification:**
+   - Created `test_frontend_integration.py` simulating full React client lifecycle: Registration → JWT extraction → Login → 30s Queue Status sync → Nearby / Distant Departure Check.
+   - Ran against live FastAPI server on port 8000 — 100% pass across all endpoints.
+   - Verified Vite frontend production build (`npm run build`) — bundled 2,398 modules in 12.37s with 0 errors.
+
+### Project Details Updated:
+- Guide: Dr. Rajeswari R (Dept. of CSE)
+- Team: Abhilash K R (Lead & ML/Backend), Laxuman Ghotale (Frontend UI/UX), Anjanadri T N (System/Cloud), Naveen L (Data/QA)
+- Location: Shridevi Hospital & Research Hospital, SIET Campus, Tumakuru
+

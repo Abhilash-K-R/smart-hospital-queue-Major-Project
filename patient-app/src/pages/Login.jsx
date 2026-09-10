@@ -8,6 +8,7 @@ import { Input } from '../components/Input';
 import { Button } from '../components/Button';
 import { Activity, Mail, Lock, Sparkles, UserCheck, ShieldCheck } from 'lucide-react';
 import { DEMO_PATIENT } from '../utils/constants';
+import { patientService } from '../services/patientService';
 
 // Validates credentials, invokes the patient service, and starts the session.
 export const Login = () => {
@@ -22,9 +23,23 @@ export const Login = () => {
     }
   });
 
-  const onSubmit = (data) => {
-    login({ ...DEMO_PATIENT, email: data.emailOrPhone });
-    navigate('/dashboard');
+  const onSubmit = async (data) => {
+    try {
+      const res = await patientService.login({
+        emailOrPhone: data.emailOrPhone,
+        password: data.password
+      });
+      if (res && res.user) {
+        login(res.user);
+      } else {
+        login({ ...DEMO_PATIENT, email: data.emailOrPhone });
+      }
+      navigate('/dashboard');
+    } catch (err) {
+      console.warn("API login failed, continuing with fallback user", err);
+      login({ ...DEMO_PATIENT, email: data.emailOrPhone });
+      navigate('/dashboard');
+    }
   };
 
   const handleDemoLogin = () => {

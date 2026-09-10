@@ -24,7 +24,10 @@ export const QueueStatus = () => {
 
   // Voice Announcement Simulator
   const handleAnnounce = () => {
-    const text = `Now calling Token Number GEN-0${queueState.currentToken} for ${queueState.doctor} in ${queueState.roomNo}`;
+    const currentDisplay = typeof queueState.currentToken === 'string' && queueState.currentToken.includes('-')
+      ? queueState.currentToken
+      : `OPD-${String(queueState.currentToken).padStart(3, '0')}`;
+    const text = `Now calling Token Number ${currentDisplay} for ${queueState.doctor} in ${queueState.roomNo}`;
     setAnnouncement(text);
     if ('speechSynthesis' in window) {
       const utterance = new SpeechSynthesisUtterance(text);
@@ -35,12 +38,15 @@ export const QueueStatus = () => {
 
   // Timeline mock tokens
   const timelineTokens = Array.from({ length: 6 }, (_, i) => {
-    const num = Math.max(1, queueState.currentToken - 3 + i);
+    const currentNum = typeof queueState.currentToken === 'number'
+      ? queueState.currentToken
+      : (parseInt(String(queueState.currentToken).replace(/\D/g, '')) || 1);
+    const num = Math.max(1, currentNum - 3 + i);
     let status = 'Waiting';
-    if (num < queueState.currentToken) status = 'Completed';
-    else if (num === queueState.currentToken) status = 'Serving';
+    if (num < currentNum) status = 'Completed';
+    else if (num === currentNum) status = 'Serving';
     return {
-      token: `GEN-0${num}`,
+      token: `OPD-${String(num).padStart(3, '0')}`,
       time: `${9 + Math.floor(i * 10 / 60)}:${(10 + i * 8) % 60 < 10 ? '0' : ''}${(10 + i * 8) % 60} AM`,
       status
     };

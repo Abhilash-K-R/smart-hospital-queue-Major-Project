@@ -12,9 +12,12 @@ export const ProgressCard = ({
   estimatedWaitMinutes = 24,
   emergencyCount = 1
 }) => {
-  // Calculate progress percentage
-  const total = numericToken;
-  const progressPercent = Math.min(100, Math.round((currentToken / total) * 100));
+  // Calculate progress percentage safely
+  const currNum = typeof currentToken === 'number' 
+    ? currentToken 
+    : (parseInt(String(currentToken).replace(/\D/g, '')) || 1);
+  const total = numericToken || 18;
+  const progressPercent = Math.min(100, Math.max(0, Math.round((currNum / total) * 100)));
 
   // Circular progress calculations
   const radius = 45;

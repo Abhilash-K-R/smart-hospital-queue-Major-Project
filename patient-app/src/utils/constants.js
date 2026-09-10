@@ -3,44 +3,45 @@ export const PROJECT_INFO = {
   title: "AI-Based Smart Hospital Queue Prediction & Patient Arrival Time Optimization System",
   shortTitle: "MediFlow AI",
   department: "Department of Computer Science & Engineering",
-  guide: "Dr. S. K. Mahadevan (HOD & Professor)",
+  institution: "Shridevi Institute of Engineering & Technology (SIET), Tumakuru",
+  guide: "Dr. Rajeswari R (Dept. of CSE)",
   team: [
-    { name: "Laxuman G", role: "Team Lead & ML Architect", usn: "1VT21CS089" },
-    { name: "Ananya Sharma", role: "Frontend UI/UX Developer", usn: "1VT21CS024" },
-    { name: "Rohan V. Kulkarni", role: "Backend & Cloud Engineer", usn: "1VT21CS112" },
-    { name: "Priyanka Naik", role: "Data Scientist & QA", usn: "1VT21CS098" }
+    { name: "Abhilash K R", role: "Team Lead & ML/Backend Architect" },
+    { name: "Laxuman Ghotale", role: "Frontend UI/UX Architect" },
+    { name: "Anjanadri T N", role: "System & Cloud Engineer" },
+    { name: "Naveen L", role: "Data Engineer & QA" }
   ],
   accuracy: "96.4%",
   datasetSize: "45,000+ Historical Consultations",
-  algorithm: "Random Forest Regressor + XGBoost Hybrid"
+  algorithm: "Random Forest Regressor + Google Distance Matrix"
 };
 
 // Demo Mode Default Data
 export const DEMO_PATIENT = {
   id: "P-10928",
-  name: "Laxuman G",
+  name: "Laxuman Ghotale",
   age: 23,
   gender: "Male",
   phone: "+91 98765 43210",
   email: "laxuman.patient@mediflow.ai",
   bloodGroup: "O+",
-  tokenNumber: "GEN-018",
+  tokenNumber: "OPD-018",
   numericToken: 18,
   currentToken: 12,
   patientsAhead: 6,
   estimatedWaitMinutes: 24,
-  doctor: "Dr. Rajeswari N.",
+  doctor: "Dr. Rajeswari R",
   doctorId: "doc-1",
   department: "General Medicine",
   roomNo: "O.P.D Block B - Room 204",
   appointmentTime: "10:30 AM",
-  appointmentDate: "Today, Aug 04, 2026",
+  appointmentDate: "Today",
   symptoms: "Persistent fever, seasonal chills & mild fatigue",
   trafficDurationMinutes: 12,
   leaveAfterMinutes: 10,
-  distanceKm: 6.8,
-  hospitalAddress: "Apollo MediFlow Super Speciality Hospital, MG Road, Tech Hub, Bengaluru - 560001",
-  emergencyInsertedCount: 1,
+  distanceKm: 4.8,
+  hospitalAddress: "Shridevi Hospital & Research Hospital, Sira Road, Tumakuru - 572106",
+  emergencyInsertedCount: 0,
   avatar: "https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&q=80&w=250"
 };
 

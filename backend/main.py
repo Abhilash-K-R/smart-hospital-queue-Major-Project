@@ -353,7 +353,16 @@ def check_departure_time(
     patient_id = int(current_user["sub"])
 
     with Session(engine) as session:
-        appointment = session.get(Appointment, request.appointment_id)
+        appointment = session.get(Appointment, request.appointment_id) if request.appointment_id else None
+
+        if not appointment:
+            # Fallback to the patient's active pending appointment if ID is omitted or 0
+            appointment = session.exec(
+                select(Appointment).where(
+                    Appointment.patient_id == patient_id,
+                    Appointment.status == "pending",
+                )
+            ).first()
 
         if not appointment:
             raise HTTPException(status_code=404, detail="Appointment not found")
@@ -447,6 +456,13 @@ def frontend_login(request: FrontendLoginRequest):
             raise HTTPException(status_code=401, detail="Invalid credentials")
 
         access_token = create_access_token(data={"sub": str(patient.id)})
+        appt = session.exec(
+            select(Appointment).where(
+                Appointment.patient_id == patient.id,
+                Appointment.status == "pending",
+            ).order_by(Appointment.id.desc())
+        ).first()
+
         return FrontendLoginResponse(
             success=True,
             token=access_token,
@@ -455,6 +471,9 @@ def frontend_login(request: FrontendLoginRequest):
                 "name": patient.name,
                 "phone": patient.phone,
                 "email": patient.email,
+                "appointment_id": appt.id if appt else None,
+                "tokenNumber": f"OPD-{appt.queue_position or appt.id:03d}" if appt else "OPD-001",
+                "numericToken": appt.queue_position or (appt.id if appt else 1),
             },
         )
 
@@ -519,6 +538,7 @@ def frontend_register(request: FrontendRegisterRequest):
                 "name": patient.name,
                 "phone": patient.phone,
                 "email": patient.email,
+                "appointment_id": appointment.id,
                 "tokenNumber": f"OPD-{token_num:03d}",
                 "numericToken": token_num,
                 "currentToken": f"OPD-{max(1, token_num - existing_count):03d}",

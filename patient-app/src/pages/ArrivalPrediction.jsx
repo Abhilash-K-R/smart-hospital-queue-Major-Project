@@ -1,22 +1,70 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useQueue } from '../context/QueueContext';
+import { useAuth } from '../context/AuthContext';
+import { queueService } from '../services/queueService';
 import { TopBar } from '../components/TopBar';
 import { Button } from '../components/Button';
 import { DEMO_PATIENT } from '../utils/constants';
-import { Navigation, Clock, MapPin, Car, Sun, ShieldAlert, ArrowRight, CheckCircle2, Radio } from 'lucide-react';
+import { Navigation, Clock, MapPin, Car, Sun, ShieldAlert, ArrowRight, CheckCircle2, Radio, RefreshCw, AlertTriangle } from 'lucide-react';
 import { motion } from 'framer-motion';
 
-// Displays the leave-now recommendation and manages its departure countdown.
+// Displays the live AI leave-now recommendation and manages its departure countdown.
 export const ArrivalPrediction = () => {
   const { queueState } = useQueue();
-  const [secondsLeft, setSecondsLeft] = useState(600); // 10 minutes default
+  const { user } = useAuth();
+  const [departureData, setDepartureData] = useState(null);
+  const [secondsLeft, setSecondsLeft] = useState(600);
   const [isDeparted, setIsDeparted] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
+  const [userCoords, setUserCoords] = useState({ lat: 13.340881, lng: 77.100601 }); // Tumakuru South default
+
+  // Geolocation detection
+  useEffect(() => {
+    if ('geolocation' in navigator) {
+      navigator.geolocation.getCurrentPosition(
+        (pos) => {
+          setUserCoords({
+            lat: pos.coords.latitude,
+            lng: pos.coords.longitude
+          });
+        },
+        () => {
+          // Keep default Tumakuru coordinates if blocked
+        },
+        { timeout: 5000 }
+      );
+    }
+  }, []);
+
+  // Fetch real departure prediction from FastAPI backend
+  const fetchPrediction = useCallback(async () => {
+    setIsLoading(true);
+    try {
+      const apptId = user?.appointment_id || user?.appointmentId || 0;
+      const res = await queueService.checkDeparture(apptId, userCoords.lat, userCoords.lng);
+      setDepartureData(res);
+      if (res && typeof res.recommendedLeaveInMinutes === 'number') {
+        setSecondsLeft(Math.max(0, Math.round(res.recommendedLeaveInMinutes * 60)));
+      }
+    } catch (err) {
+      console.warn("Real /departure-check call failed, using fallback:", err.message);
+    } finally {
+      setIsLoading(false);
+    }
+  }, [user, userCoords]);
+
+  // Initial load and periodic re-check every 30s
+  useEffect(() => {
+    fetchPrediction();
+    const interval = setInterval(fetchPrediction, 30000);
+    return () => clearInterval(interval);
+  }, [fetchPrediction]);
 
   // Departure Countdown
   useEffect(() => {
     if (secondsLeft <= 0 || isDeparted) return;
     const interval = setInterval(() => {
-      setSecondsLeft(prev => prev - 1);
+      setSecondsLeft(prev => Math.max(0, prev - 1));
     }, 1000);
     return () => clearInterval(interval);
   }, [secondsLeft, isDeparted]);
@@ -31,56 +79,107 @@ export const ArrivalPrediction = () => {
     setIsDeparted(true);
   };
 
+  const shouldLeaveNow = departureData?.should_leave_now || (secondsLeft <= 0 && !isDeparted);
+
   return (
     <div className="space-y-8">
       <TopBar title="AI Leave Now Departure Optimization" subtitle="Google Maps Traffic & OPD Queue Synchronization" />
 
       {/* Main AI Departure Feature Hero Card */}
-      <div className="glass-card rounded-3xl p-6 sm:p-10 space-y-8 border-2 border-cyan-500/40 relative overflow-hidden ai-glow-cyan">
+      <div className={`glass-card rounded-3xl p-6 sm:p-10 space-y-8 border-2 relative overflow-hidden transition-all duration-500 ${
+        shouldLeaveNow && !isDeparted
+          ? 'border-rose-500/60 shadow-2xl shadow-rose-500/10'
+          : isDeparted
+          ? 'border-emerald-500/60 shadow-2xl shadow-emerald-500/10'
+          : 'border-cyan-500/40 ai-glow-cyan'
+      }`}>
         
         {/* Header Pill */}
         <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 border-b border-slate-200 dark:border-slate-800 pb-6">
           <div className="flex items-center gap-3">
-            <div className="p-3 bg-gradient-to-tr from-cyan-500 to-blue-600 text-white rounded-2xl shadow-lg">
+            <div className={`p-3 text-white rounded-2xl shadow-lg ${
+              shouldLeaveNow && !isDeparted
+                ? 'bg-gradient-to-tr from-rose-500 to-amber-600'
+                : isDeparted
+                ? 'bg-gradient-to-tr from-emerald-500 to-teal-600'
+                : 'bg-gradient-to-tr from-cyan-500 to-blue-600'
+            }`}>
               <Navigation className="w-6 h-6 animate-pulse" />
             </div>
             <div>
-              <span className="text-[10px] uppercase font-bold text-cyan-600 dark:text-cyan-400 tracking-widest">Smart Departure Engine</span>
-              <h2 className="text-2xl font-black text-slate-900 dark:text-white mt-0.5">Optimal Leave Time Recommendation</h2>
+              <span className="text-[10px] uppercase font-bold text-cyan-600 dark:text-cyan-400 tracking-widest">
+                Smart Departure Engine • Shridevi Hospital Tumakuru
+              </span>
+              <h2 className="text-2xl font-black text-slate-900 dark:text-white mt-0.5">
+                {isDeparted
+                  ? 'Patient En Route (GPS Tracking Active)'
+                  : shouldLeaveNow
+                  ? '🚨 Critical: Leave Home Now!'
+                  : 'Optimal Leave Time Recommendation'}
+              </h2>
             </div>
           </div>
 
-          <div className="flex items-center gap-2 px-3.5 py-1.5 rounded-xl bg-cyan-50 dark:bg-cyan-950/60 border border-cyan-500/30 text-cyan-600 dark:text-cyan-400 font-bold text-xs">
-            <Radio className="w-4 h-4 text-cyan-500 animate-ping" /> Live Traffic Active
+          <div className="flex items-center gap-2">
+            <button
+              onClick={fetchPrediction}
+              disabled={isLoading}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-200 transition-colors"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${isLoading ? 'animate-spin' : ''}`} /> Sync Live
+            </button>
+            <div className={`flex items-center gap-2 px-3.5 py-1.5 rounded-xl border font-bold text-xs ${
+              shouldLeaveNow && !isDeparted
+                ? 'bg-rose-50 dark:bg-rose-950/60 border-rose-500/40 text-rose-600 dark:text-rose-400'
+                : 'bg-cyan-50 dark:bg-cyan-950/60 border-cyan-500/30 text-cyan-600 dark:text-cyan-400'
+            }`}>
+              <Radio className="w-4 h-4 animate-ping" /> {departureData?.trafficCondition || 'Live Route Active'}
+            </div>
           </div>
         </div>
 
         {/* Big Countdown & Main Action Grid */}
         <div className="grid grid-cols-1 md:grid-cols-12 gap-8 items-center">
           
-          {/* Left 6 cols: Large Timer */}
+          {/* Left 6 cols: Large Timer / Alert */}
           <div className="md:col-span-6 space-y-4 text-center md:text-left">
             <p className="text-xs font-semibold uppercase text-slate-500 tracking-wider">
-              {isDeparted ? 'PATIENT IN TRANSIT' : 'DEPARTURE COUNTDOWN TIMER'}
+              {isDeparted ? 'PATIENT IN TRANSIT' : shouldLeaveNow ? 'IMMEDIATE DEPARTURE REQUIRED' : 'DEPARTURE COUNTDOWN TIMER'}
             </p>
 
-            <div className="p-6 bg-slate-900 text-white rounded-3xl space-y-2 border border-slate-800 shadow-2xl">
-              <span className="text-xs text-cyan-400 font-bold uppercase tracking-widest">
-                {isDeparted ? 'En Route to Hospital' : 'Leave Home In'}
+            <div className={`p-6 rounded-3xl space-y-2 border shadow-2xl ${
+              shouldLeaveNow && !isDeparted
+                ? 'bg-gradient-to-br from-rose-950/90 to-slate-900 border-rose-500/50 text-white'
+                : isDeparted
+                ? 'bg-gradient-to-br from-emerald-950/90 to-slate-900 border-emerald-500/50 text-white'
+                : 'bg-slate-900 text-white border-slate-800'
+            }`}>
+              <span className={`text-xs font-bold uppercase tracking-widest ${
+                shouldLeaveNow && !isDeparted ? 'text-rose-400' : isDeparted ? 'text-emerald-400' : 'text-cyan-400'
+              }`}>
+                {isDeparted ? 'En Route to Hospital' : shouldLeaveNow ? 'Depart Immediately' : 'Leave Home In'}
               </span>
-              <p className="text-6xl font-black font-mono tracking-tight text-white">
-                {isDeparted ? 'EN ROUTE' : formatCountdown(secondsLeft)}
+
+              <p className={`text-6xl font-black font-mono tracking-tight ${
+                shouldLeaveNow && !isDeparted ? 'text-rose-400 animate-pulse' : 'text-white'
+              }`}>
+                {isDeparted ? 'EN ROUTE' : shouldLeaveNow ? 'LEAVE NOW' : formatCountdown(secondsLeft)}
               </p>
-              <p className="text-xs text-slate-400">
+
+              <p className="text-xs text-slate-300">
                 {isDeparted
-                  ? 'Estimated Arrival at OPD Lounge: 10:42 AM'
+                  ? `Estimated Arrival at OPD Lounge: ${departureData?.estimatedArrivalTime || '10:42 AM'}`
+                  : departureData?.message
+                  ? departureData.message
+                  : shouldLeaveNow
+                  ? 'Your travel time matches or exceeds your predicted wait time. Depart now to avoid missing your slot!'
                   : 'Leaving at this exact moment ensures you arrive 5 mins before Token Call.'}
               </p>
             </div>
 
             <Button
               size="lg"
-              variant={isDeparted ? 'accent' : 'primary'}
+              variant={isDeparted ? 'accent' : shouldLeaveNow ? 'primary' : 'primary'}
               className="w-full"
               icon={CheckCircle2}
               onClick={handleLeaveNow}
@@ -95,25 +194,33 @@ export const ArrivalPrediction = () => {
             <div className="grid grid-cols-2 gap-4 text-xs">
               <div className="p-4 bg-slate-50 dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 space-y-1">
                 <span className="text-slate-500 font-semibold flex items-center gap-1.5"><Car className="w-3.5 h-3.5 text-blue-500" /> Travel Duration</span>
-                <p className="text-xl font-bold text-slate-900 dark:text-white">{queueState.trafficDurationMinutes} Mins</p>
-                <p className="text-[10px] text-emerald-500 font-semibold">Moderate Traffic (Green)</p>
+                <p className="text-xl font-bold text-slate-900 dark:text-white">
+                  {departureData?.travel_time_minutes ?? queueState.trafficDurationMinutes} Mins
+                </p>
+                <p className="text-[10px] text-emerald-500 font-semibold">Live Google Maps / Haversine</p>
               </div>
 
               <div className="p-4 bg-slate-50 dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 space-y-1">
                 <span className="text-slate-500 font-semibold flex items-center gap-1.5"><Clock className="w-3.5 h-3.5 text-amber-500" /> OPD Queue Wait</span>
-                <p className="text-xl font-bold text-slate-900 dark:text-white">{queueState.estimatedWaitMinutes} Mins</p>
+                <p className="text-xl font-bold text-slate-900 dark:text-white">
+                  {departureData?.predicted_wait_minutes ?? queueState.estimatedWaitMinutes} Mins
+                </p>
                 <p className="text-[10px] text-blue-500 font-semibold">{queueState.patientsAhead} Patients Ahead</p>
               </div>
 
               <div className="p-4 bg-slate-50 dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 space-y-1">
                 <span className="text-slate-500 font-semibold flex items-center gap-1.5"><MapPin className="w-3.5 h-3.5 text-rose-500" /> Hospital Distance</span>
-                <p className="text-xl font-bold text-slate-900 dark:text-white">{DEMO_PATIENT.distanceKm} Km</p>
-                <p className="text-[10px] text-slate-400">Via MG Road Expressway</p>
+                <p className="text-xl font-bold text-slate-900 dark:text-white">
+                  {departureData?.distanceKm ?? DEMO_PATIENT.distanceKm} Km
+                </p>
+                <p className="text-[10px] text-slate-400">SIET Tumakuru Route</p>
               </div>
 
               <div className="p-4 bg-slate-50 dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 space-y-1">
                 <span className="text-slate-500 font-semibold flex items-center gap-1.5"><Sun className="w-3.5 h-3.5 text-amber-400" /> Weather</span>
-                <p className="text-xl font-bold text-slate-900 dark:text-white">28°C Clear</p>
+                <p className="text-xl font-bold text-slate-900 dark:text-white">
+                  {departureData?.weather || '28°C Clear'}
+                </p>
                 <p className="text-[10px] text-slate-400">Ideal Driving Condition</p>
               </div>
             </div>
@@ -123,19 +230,19 @@ export const ArrivalPrediction = () => {
 
       </div>
 
-      {/* Simulated Live Route Preview Map Widget */}
+      {/* Live Route Preview Map Widget */}
       <div className="glass-card rounded-3xl p-6 sm:p-8 space-y-4">
         <div className="flex items-center justify-between">
           <div>
             <h3 className="text-lg font-bold text-slate-900 dark:text-white">Live Route & Traffic Simulation Map</h3>
-            <p className="text-xs text-slate-500">From Patient Residence → Apollo MediFlow Super Speciality OPD</p>
+            <p className="text-xs text-slate-500">From Patient Residence (Tumakuru) → Shridevi Hospital & Research Hospital, SIET Campus</p>
           </div>
           <span className="px-3 py-1 bg-emerald-500/10 text-emerald-600 rounded-full text-xs font-bold border border-emerald-500/30">
-            Route Clear • 12 mins
+            Route Clear • {departureData?.travel_time_minutes ?? 12} mins
           </span>
         </div>
 
-        {/* Dynamic Map Graphic Placeholder */}
+        {/* Dynamic Map Graphic */}
         <div className="w-full h-64 bg-slate-900 rounded-2xl relative overflow-hidden flex items-center justify-center p-6 border border-slate-800">
           <div className="absolute inset-0 bg-[radial-gradient(#1e293b_1px,transparent_1px)] [background-size:16px_16px] opacity-40" />
 
@@ -146,12 +253,12 @@ export const ArrivalPrediction = () => {
 
           {/* Patient start node */}
           <div className="absolute left-12 bottom-12 p-3 bg-blue-600 text-white rounded-2xl shadow-lg flex items-center gap-2 text-xs font-bold">
-            <MapPin className="w-4 h-4" /> Patient Home (MG Road)
+            <MapPin className="w-4 h-4" /> Patient Home (Tumakuru)
           </div>
 
           {/* Hospital destination node */}
           <div className="absolute right-12 top-12 p-3 bg-red-600 text-white rounded-2xl shadow-lg flex items-center gap-2 text-xs font-bold">
-            <Navigation className="w-4 h-4 animate-bounce" /> Hospital OPD OPD-204
+            <Navigation className="w-4 h-4 animate-bounce" /> Shridevi Hospital OPD
           </div>
         </div>
       </div>

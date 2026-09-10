@@ -1,5 +1,6 @@
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import { DEMO_PATIENT } from '../utils/constants';
+import { queueService } from '../services/queueService';
 
 // Shares the live queue model and demo controls between queue-related screens.
 const QueueContext = createContext();
@@ -22,31 +23,46 @@ export const QueueProvider = ({ children }) => {
     trafficDurationMinutes: DEMO_PATIENT.trafficDurationMinutes
   });
 
+  // Fetches live queue status from FastAPI backend
+  const fetchQueueData = useCallback(async (token = queueState.tokenNumber) => {
+    try {
+      const data = await queueService.getQueueStatus(token);
+      if (data && (data.tokenNumber || data.currentToken)) {
+        setQueueState(prev => ({
+          ...prev,
+          tokenNumber: data.tokenNumber || prev.tokenNumber,
+          numericToken: data.numericToken ?? prev.numericToken,
+          currentToken: data.currentToken ?? prev.currentToken,
+          patientsAhead: data.patientsAhead ?? prev.patientsAhead,
+          estimatedWaitMinutes: data.estimatedWaitMinutes ?? prev.estimatedWaitMinutes,
+          doctor: data.doctor || prev.doctor,
+          department: data.department || prev.department,
+          roomNo: data.roomNo || prev.roomNo,
+          emergencyCount: data.emergencyCount ?? prev.emergencyCount,
+          lastUpdated: data.lastUpdated || new Date().toLocaleTimeString()
+        }));
+        return;
+      }
+    } catch (err) {
+      console.warn("Queue sync from backend failed, falling back to local state:", err.message);
+    }
+  }, [queueState.tokenNumber]);
+
+  // Initial load
+  useEffect(() => {
+    fetchQueueData();
+  }, [fetchQueueData]);
+
   // Auto Refresh Queue every 30 seconds
   useEffect(() => {
     if (!queueState.isAutoRefresh) return;
 
     const interval = setInterval(() => {
-      setQueueState(prev => {
-        // Simulate queue progression if patients ahead > 0
-        if (prev.patientsAhead > 0) {
-          const nextCurrent = prev.currentToken + 1;
-          const nextAhead = Math.max(0, prev.numericToken - nextCurrent);
-          const nextWait = nextAhead * 4; // 4 mins per patient
-          return {
-            ...prev,
-            currentToken: nextCurrent,
-            patientsAhead: nextAhead,
-            estimatedWaitMinutes: nextWait,
-            lastUpdated: new Date().toLocaleTimeString()
-          };
-        }
-        return prev;
-      });
+      fetchQueueData();
     }, 30000); // 30s auto refresh
 
     return () => clearInterval(interval);
-  }, [queueState.isAutoRefresh]);
+  }, [queueState.isAutoRefresh, fetchQueueData]);
 
   // Insert Emergency Patient
   const triggerEmergency = () => {

@@ -2,10 +2,14 @@ import api from './api';
 import { DEMO_PATIENT } from '../utils/constants';
 
 export const patientService = {
-  // Authenticates a patient and falls back to the demo identity when offline.
+  // Authenticates a patient and stores bearer token for subsequent API calls.
   async login(credentials) {
     try {
-      return await api.post('/auth/login', credentials);
+      const res = await api.post('/auth/login', credentials);
+      if (res && res.token) {
+        localStorage.setItem('mediflow_auth_token', res.token);
+      }
+      return res;
     } catch {
       // Demo mode fallback
       return {
@@ -16,10 +20,14 @@ export const patientService = {
     }
   },
 
-  // Registers a patient and appointment, generating a demo token when offline.
+  // Registers a patient and appointment, saving the JWT token for live session.
   async registerPatient(formData) {
     try {
-      return await api.post('/patients/register', formData);
+      const res = await api.post('/patients/register', formData);
+      if (res && res.token) {
+        localStorage.setItem('mediflow_auth_token', res.token);
+      }
+      return res;
     } catch {
       // Generate demo token
       const newTokenNum = Math.floor(Math.random() * 20) + 15;

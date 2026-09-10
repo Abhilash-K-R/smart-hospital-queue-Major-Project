@@ -36,7 +36,11 @@ export const QueueCard = ({ queueData }) => {
 
         <div className="p-4 bg-emerald-50 dark:bg-emerald-950/30 rounded-2xl border border-emerald-200/50 dark:border-emerald-900/50 text-center">
           <span className="text-xs font-semibold text-slate-500 dark:text-slate-400">NOW SERVING</span>
-          <p className="text-3xl font-black text-emerald-600 dark:text-emerald-400 tracking-tight mt-1">GEN-0{currentToken}</p>
+          <p className="text-3xl font-black text-emerald-600 dark:text-emerald-400 tracking-tight mt-1">
+            {typeof currentToken === 'string' && currentToken.includes('-')
+              ? currentToken
+              : `OPD-${String(currentToken).padStart(3, '0')}`}
+          </p>
         </div>
       </div>
 
