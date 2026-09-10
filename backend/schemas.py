@@ -180,3 +180,81 @@ class DepartureCheckResponse(BaseModel):
     travel_time_minutes: int
     should_leave_now: bool
     message: str
+
+
+# ---------------------------------------------------------------------
+# FRONTEND BRIDGE SCHEMAS (Laxuman & Naveen UI compatibility)
+# ---------------------------------------------------------------------
+
+class FrontendLoginRequest(BaseModel):
+    emailOrPhone: str | None = None
+    email: str | None = None
+    password: str
+
+
+class FrontendLoginResponse(BaseModel):
+    success: bool = True
+    token: str
+    user: dict
+
+
+class FrontendRegisterRequest(BaseModel):
+    name: str | None = None
+    fullName: str | None = None
+    phone: str
+    email: str
+    password: str = "Patient@123"
+    age: int | None = None
+    gender: str | None = None
+    bloodGroup: str | None = None
+    address: str | None = None
+    emergencyContact: str | None = None
+    department: str | None = None
+    doctor: str | None = None
+    appointmentDate: str | None = None
+    appointmentTime: str | None = None
+    symptoms: str | None = None
+
+
+class FrontendQueueStatusResponse(BaseModel):
+    tokenNumber: str
+    currentToken: str
+    numericToken: int
+    patientsAhead: int
+    estimatedWaitMinutes: float
+    doctor: str
+    department: str
+    roomNo: str
+    emergencyCount: int
+    lastUpdated: str
+
+
+class CalculateDepartureRequest(BaseModel):
+    appointment_id: int
+    patient_lat: float | None = None
+    patient_lng: float | None = None
+    patient_latitude: float | None = None
+    patient_longitude: float | None = None
+    buffer_minutes: int | None = 0
+
+
+class PredictArrivalResponse(BaseModel):
+    recommendedLeaveInMinutes: float
+    trafficDelayMinutes: int
+    queueWaitMinutes: float
+    distanceKm: float
+    trafficCondition: str
+    weather: str
+    optimalDepartureTime: str
+    estimatedArrivalTime: str
+    should_leave_now: bool
+    message: str
+
+
+class NotificationItem(BaseModel):
+    id: int
+    title: str
+    message: str
+    timestamp: str
+    read: bool
+    type: str  # 'alert', 'info', 'warning', 'emergency'

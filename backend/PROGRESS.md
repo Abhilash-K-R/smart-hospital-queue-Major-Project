@@ -96,3 +96,28 @@ All 5 planned endpoints built and verified via /docs: Auth, Doctors/Departments,
 ### What's next
 - Phase 4: Google Maps travel-time integration + departure-time notification logic (Naveen, staff-dashboard branch)
 - Later: /predict-wait will be wired to pull LIVE queue data automatically (via existing /appointments/{id}/queue-status logic) instead of requiring manually-supplied values — that manual-input version was for Phase 3 testing only.
+
+## Phase 4 — Google Maps Travel Time & Departure-Time Notification (10 September 2026)
+**Branch:** dev-abhi
+
+### What was done
+1. Created `travel_time.py` — implements `get_mock_travel_time()` using the Haversine formula (Earth radius 6,371 km, straight-line distance to SIET Tumakuru at 13.376230, 77.097439, assuming 25 km/h city speed with random traffic variation, min 3 min). Also contains `get_real_travel_time()` for Google Maps Distance Matrix API (active when GOOGLE_MAPS_API_KEY is provided in .env).
+2. Added `POST /departure-check` in `main.py` — core departure decision algorithm. Queries real-time pending queue length ahead for the appointment, fetches doctor and department details, invokes the Random Forest `predict_wait()` model, calculates travel time, and triggers `should_leave_now = travel_time >= predicted_wait` with buffer estimation.
+3. Added `CORSMiddleware` in `main.py` — enables seamless cross-origin requests from React frontends running on Vite (localhost:3000 / 5173).
+4. Added Frontend Bridge Layer in `main.py` & `schemas.py` to support Laxuman's and Naveen's React applications out-of-the-box:
+   - `POST /auth/login` (supports email or phone login)
+   - `POST /patients/register` (instant account creation and appointment booking)
+   - `GET /patients/profile` & `PUT /patients/profile` (profile inspection and update)
+   - `GET /queue/status/{token_identifier}` (delivers queue data shaped for QueueCard & ProgressCard)
+   - `POST /calculate-departure` (alias for Naveen's GPS coordinate format)
+   - `GET /ai/predict-arrival` (powers Laxuman's ArrivalPrediction.jsx countdown and route simulation)
+   - `GET /notifications` & `PUT /notifications/{id}/read` (in-app notification feed)
+5. Created `test_departure_check.py` — automated test suite covering patient auth, appointment booking, nearby patient check (should_leave_now == False), far patient check (should_leave_now == True), cross-patient 403 security check, and all frontend bridge routes. Verified 100% pass across all tests against Neon PostgreSQL and the loaded ML model.
+
+### Decisions made
+- Chose an in-app notification / polling architecture instead of Firebase Cloud Messaging (FCM) after auditing Laxuman's frontend: his React UI does not have FCM service workers, but already includes a 30s auto-refresh loop and dedicated Arrival Prediction / Notification screens.
+- Fixed `doctor_id` formatting (`f"DOC{doctor.id}"`) and department query in `/departure-check` so predictions match the model's trained one-hot dummy features.
+
+### What's next
+- Phase 5: Integration with Laxuman's patient app frontend (test running patient-app connected to the live backend).
+- Phase 6: Staff dashboard queue control and emergency insertion.
