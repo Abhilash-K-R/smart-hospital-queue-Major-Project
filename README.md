@@ -21,8 +21,8 @@ AI-based system that predicts hospital wait times, sends "leave now" alerts base
 - ✅ **Phase 2 — Backend Core APIs:** JWT auth, doctor & department routing, appointment scheduling, and live queue length endpoints built in FastAPI.
 - ✅ **Phase 3 — ML Wait-Time Engine:** Random Forest Regressor (200 estimators, max depth 10, MAE 5.45 min) trained and deployed directly inside FastAPI.
 - ✅ **Phase 4 — Google Maps & Live Departure Optimization:** Haversine & Google Maps Distance Matrix switch implemented; `POST /departure-check` core decision algorithm (`should_leave = travel_time >= predicted_wait`) built and verified.
-- ✅ **Phase 5 — Patient App Frontend Bridge (Release v0.4.0):** Complete React + Vite + Tailwind CSS patient app integrated with live backend. Real JWT token storage, real login/registration, live AI departure engine countdown, and 30-second queue auto-refresh verified end-to-end.
-- 🔄 **Phase 6 — Staff Dashboard & Emergency Queue Control:** Next phase (Naveen & team).
+- ✅ **Phase 5 — Patient App Frontend Bridge (Release v0.4.0):** Complete React + Vite + Tailwind CSS patient app integrated with live backend on port 3000. Real JWT token storage, real login/registration, live AI departure engine countdown, and 30-second queue auto-refresh verified end-to-end.
+- ✅ **Phase 6 — Staff Dashboard & Emergency Queue Control:** Complete React + Vite staff portal on port 3001. Instant emergency triage insertion at Position #1 with atomic database queue bumping (+1) for regular patients, dynamic Random Forest ML wait recalculation, "Call Next Patient" workflow, live hospital operations KPIs, and AI symptom classifier.
 
 ---
 
@@ -43,6 +43,15 @@ npm install
 npm run dev -- --port 3000
 ```
 - Patient Web Application: `http://localhost:3000`
+
+### 3. Start the Staff Dashboard
+```powershell
+cd staff-dashboard
+npm install
+npm run dev -- --port 3001
+```
+- Staff Dashboard Web Application: `http://localhost:3001`
+- Default Login: Username `admin` | Password `admin` (or `reception1` / `admin`)
 
 ---
 

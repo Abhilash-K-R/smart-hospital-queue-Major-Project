@@ -257,4 +257,92 @@ class NotificationItem(BaseModel):
     message: str
     timestamp: str
     read: bool
-    type: str  # 'alert', 'info', 'warning', 'emergency'
+    type: str  # 'alert', 'info', 'warning', 'emergency'
+
+
+# ---------------------------------------------------------------------
+# PHASE 6: STAFF DASHBOARD & EMERGENCY QUEUE SCHEMAS
+# ---------------------------------------------------------------------
+
+class StaffLoginRequest(BaseModel):
+    username: str
+    password: str = "Staff@123"
+
+
+class StaffLoginResponse(BaseModel):
+    success: bool = True
+    token: str
+    user: dict
+
+
+class StaffQueueItem(BaseModel):
+    id: int
+    patient_id: int
+    name: str
+    age: int | None = None
+    gender: str | None = None
+    triage: str  # 'Critical', 'Urgent', 'Standard'
+    tokenNumber: str
+    queue_position: int
+    doctor_id: int
+    doctor: str
+    department: str
+    waitTime: str
+    status: str  # 'pending', 'serving', 'completed', 'skipped'
+    booked_time: str
+
+
+class EmergencyInsertRequest(BaseModel):
+    name: str
+    age: int | None = 45
+    gender: str | None = "Male"
+    chief_complaint: str
+    doctor_id: int | None = None
+    blood_pressure: str | None = "120/80"
+    heart_rate: int | None = 85
+    spo2: int | None = 98
+    temperature: float | None = 37.0
+
+
+class EmergencyInsertResponse(BaseModel):
+    success: bool = True
+    message: str
+    appointment_id: int
+    tokenNumber: str
+    queue_position: int
+    impacted_patients: int
+
+
+class QueueAdvanceRequest(BaseModel):
+    appointment_id: int
+    action: str = "completed"  # 'completed', 'skipped', 'serving'
+
+
+class DoctorStatusUpdateRequest(BaseModel):
+    status: str  # 'Active', 'On Break', 'Delayed'
+    avg_consult_minutes: int | None = None
+
+
+class StaffStatsResponse(BaseModel):
+    total_today: int
+    currently_waiting: int
+    avg_wait_minutes: float
+    active_doctors: int
+    emergency_count: int
+    recent_activity: list[dict]
+
+
+class SymptomAnalyzeRequest(BaseModel):
+    symptoms: str
+
+
+class SymptomAnalyzeResult(BaseModel):
+    dept: str
+    match: int
+    severity: str
+    description: str
+
+
+class SymptomAnalyzeResponse(BaseModel):
+    results: list[SymptomAnalyzeResult]
+

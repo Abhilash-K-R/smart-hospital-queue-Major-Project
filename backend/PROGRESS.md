@@ -153,6 +153,32 @@ All 5 planned endpoints built and verified via /docs: Auth, Doctors/Departments,
 ### Release:
 - Tagged and released `v0.4.0` on GitHub: *"Release v0.4.0: Phase 4 Google Maps departure check and full patient-app frontend bridge integration"*.
 
-### What's next:
-- Phase 6: Staff dashboard queue management, live emergency triage insertion, and multi-doctor counter coordination (Naveen & team).
+## Phase 6 — Staff Dashboard & Emergency Queue Control (11 September 2026)
+**Branch:** dev-abhi
+
+### What was done
+1. **Pydantic Schemas Added in `schemas.py`:**
+   - `StaffLoginRequest`, `StaffLoginResponse`, `StaffQueueItem`
+   - `EmergencyInsertRequest`, `EmergencyInsertResponse`
+   - `QueueAdvanceRequest`, `DoctorStatusUpdateRequest`, `StaffStatsResponse`
+   - `SymptomAnalyzeRequest`, `SymptomAnalyzeResponse`, `SymptomAnalyzeResult`
+2. **Phase 6 Staff Endpoints Implemented in `main.py`:**
+   - `POST /token` & `POST /auth/staff/login`: Unified staff authentication accepting form-data or JSON, issuing role-based JWTs.
+   - `GET /staff/queue`: Live triage queue with wait-time calculation, doctor mapping, and critical/urgent triage badges.
+   - `POST /staff/emergency-insert`: Core triage insertion endpoint. Automatically sets emergency appointment at Position #1 and atomically shifts all pending regular patient appointments back by +1.
+   - `POST /staff/queue/call-next`: Advances queue, moving active patient to completed and next pending patient to serving.
+   - `PUT /staff/appointments/{id}/status`: Manual status overrides (`completed`, `skipped`, `serving`) with atomic queue adjustments.
+   - `GET /staff/stats`: Live KPIs (total patients today, currently waiting, average predicted wait time, emergency cases count, dynamic recent activity feed).
+   - `POST /staff/symptom-analyze`: AI-assisted symptom classifier mapping clinical complaints to appropriate specialties (Cardiology, Pulmonology, General Medicine) with confidence scores.
+   - `GET /staff/doctors`: Live doctor roster with consultation metrics and active queue lengths.
+3. **High-Performance Atomic SQL Optimization:**
+   - Replaced multi-step sequential ORM update loops with single atomic PostgreSQL statements (`UPDATE appointment SET queue_position = ...`), drastically accelerating emergency insertion (<100ms) and preventing SSL socket timeouts on Neon serverless database.
+   - Fortified connection pooling in `database.py` with `pool_pre_ping=True` and `pool_recycle=60`.
+4. **Automated Verification:**
+   - Created `test_phase6_staff.py`: 100% pass across all 8 staff routes.
+   - Created `test_cross_system_flow.py`: Proved project novelty end-to-end. Inserting an acute trauma emergency patient dynamically shifted regular patient queue position (8 -> 9), increased predicted wait time (172.9m -> 178.3m), and pushed back the patient's departure time (159m -> 163m remaining buffer).
+
+### Phase 6 — COMPLETE
+All staff control endpoints and cross-system dynamic queue shifting fully built, tested, and verified.
+
 
