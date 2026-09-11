@@ -14,6 +14,25 @@ import {
   Info
 } from 'lucide-react';
 
+/**
+ * MobileDispatchModal Component
+ * -----------------------------
+ * Simulates a dual-channel mobile smartphone notification screen (WhatsApp & GSM SMS)
+ * for Shridevi Hospital OPD patients.
+ * 
+ * Features:
+ * - Interactive smartphone frame mockup with iOS/Android top status bar.
+ * - Dual-tab switcher between WhatsApp (green verified bot) and SMS (blue carrier bubble).
+ * - Live custom phone number tester.
+ * - 1-Click "Send to Real WhatsApp" button using `wa.me/?text=...` deep link.
+ * - Clipboard copy helper and native Web Push Notification trigger.
+ * 
+ * @param {Object} props
+ * @param {boolean} props.isOpen - Modal visibility flag
+ * @param {Function} props.onClose - Modal close handler
+ * @param {Object} props.dispatchData - Dispatch payload from /notifications/dispatch-preview
+ * @param {Function} [props.onTriggerBrowserNotification] - Optional native browser notification trigger
+ */
 export default function MobileDispatchModal({ isOpen, onClose, dispatchData, onTriggerBrowserNotification }) {
   const [activeTab, setActiveTab] = useState('whatsapp'); // 'whatsapp' | 'sms'
   const [copied, setCopied] = useState(false);
@@ -21,6 +40,7 @@ export default function MobileDispatchModal({ isOpen, onClose, dispatchData, onT
   const [phoneEdited, setPhoneEdited] = useState(false);
 
   if (!isOpen || !dispatchData) return null;
+
 
   const recipient = phoneEdited ? customPhone : (dispatchData.phone || dispatchData.whatsapp?.recipient || '9876543210');
   const cleanPhone = recipient.replace(/[^0-9]/g, '');

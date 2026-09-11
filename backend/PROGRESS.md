@@ -220,4 +220,28 @@ All staff control endpoints and cross-system dynamic queue shifting fully built,
 
 ### Phase 7 — COMPLETE
 Full cross-system integration, real-world hospital disruption handling, and post-consultation ML evaluation logging verified end-to-end.
+
+## Phase 8 — Shridevi Hospital Rebranding & Dual WhatsApp + SMS Mobile Dispatch System (11 September 2026)
+**Branch:** dev-abhi  
+**Release:** v0.8.0  
+**Owner:** Abhilash KR, Anjanadri TN  
+
+### What was done
+1. **Hospital Rebranding across Backend & Metadata:**
+   - Standardized hospital branding to **Shridevi Hospital & Research Hospital, Sira Road, Tumakuru - 572106**.
+   - Updated hospital coordinates to `13.376230, 77.097439` (SIET / Shridevi Campus Tumakuru).
+   - Configured official doctor metadata roster with Room numbers (204, 302, 108, etc.) and average consultation speeds.
+2. **Dual-Channel Dispatch API (`POST /notifications/dispatch-preview`):**
+   - Implemented `DispatchNotificationRequest` and `DispatchNotificationResponse` in `schemas.py`.
+   - Built endpoint generating simultaneous, synchronized notifications:
+     - **WhatsApp Rich Message:** Formatted with bold headings, token numbers, doctor name, room number, estimated travel time, remaining wait time, Google Maps hospital navigation URL, and zero-wait live queue pass link.
+     - **GSM SMS Compact Text:** Standard 160-character carrier SMS format ensuring 100% reach even without active mobile data.
+     - **WhatsApp Share URL:** URL-encoded `https://wa.me/?text=...` enabling 1-click execution in WhatsApp Web or native mobile app.
+3. **Automated Testing (`test_dispatch_notifications.py`):**
+   - Created test suite verifying standard preview generation, urgent leave-now alert formatting, and Shridevi Hospital branding.
+   - Executed against live backend with 100% test pass rate.
+
+### Phase 8 — COMPLETE
+Dual mobile notification dispatch engine operational and validated.
+
 

@@ -240,3 +240,24 @@ Integrated Laxuman's React patient application with Abhilash's FastAPI backend a
    - Verified Vite production build (`npm run build`) — bundled 2,398 modules in 12.37s with 0 errors.
    - Ran `test_frontend_integration.py` against live FastAPI server on port 8000 — 100% pass across registration, login, 30s queue sync, nearby departure check (wait at home), and far departure check (leave now alert).
    - Created and pushed annotated release tag `v0.4.0`.
+
+## Phase 8 — Shridevi Hospital Rebranding & Dual WhatsApp + SMS Mobile Dispatch UI (11 September 2026)
+**Branch:** dev-abhi  
+**Release Tag:** `v0.8.0`  
+**Owner:** Laxuman, Abhilash KR  
+
+### What Was Done
+1. **Shridevi MediFlow AI Brand Integration:**
+   - Updated Navigation Bar, TopBar, Footer, and Page titles to **Shridevi MediFlow AI • Shridevi Hospital & Research Hospital, Tumakuru**.
+   - Updated contact info, emergency helpline numbers, and email handles (`@shridevimediflow.ai`).
+   - Standardized OPD pass headers and PDF token downloads to Shridevi Hospital.
+2. **Interactive Smartphone Alert Simulator (`src/components/MobileDispatchModal.jsx`):**
+   - Built an interactive phone mockup with realistic mobile status bar, verified hospital green badge, and WhatsApp/SMS tabs.
+   - **WhatsApp Tab:** Displays rich template with bold metadata, tokens, travel times, doctor/room details, and Google Maps direct link.
+   - **SMS Tab:** Displays 160-char GSM carrier SMS format with character counter.
+   - **Live Custom Phone Number Input:** Allows testing dispatch messages with any custom phone number.
+   - **One-Click Real WhatsApp Trigger:** Sends the exact preview text to WhatsApp Web or WhatsApp mobile app using `wa.me` links.
+   - **Web Push Notifications:** Integrated `Notification.requestPermission()` trigger for desktop/mobile browser notifications.
+3. **Arrival Prediction & Notification Feed Integration:**
+   - Added **"WhatsApp & SMS Dispatch"** simulation button to `ArrivalPrediction.jsx` and `Notifications.jsx`.
+   - Wired `notificationService.getDispatchPreview()` with API call to `/notifications/dispatch-preview` and resilient offline fallback.

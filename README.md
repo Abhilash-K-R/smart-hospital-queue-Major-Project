@@ -1,32 +1,26 @@
-# Smart Hospital Queue Prediction and Patient Arrival Time Optimization System
+# 🏥 Shridevi MediFlow AI — Smart Hospital Queue Prediction and Patient Arrival Time Optimization System
+### Shridevi Hospital & Research Hospital, Sira Road, Tumakuru - 572106
 
-AI-based system that predicts hospital wait times, sends "leave now" alerts based on live travel time, and manages emergency patients in the queue — built as a final-year major project (VTU, Phase 2) at SIET, Tumakuru.
+AI-based system that predicts hospital wait times, sends proactive "leave now" dual WhatsApp & SMS alerts based on live travel time, and manages emergency patients in the OPD queue — built as a final-year major project (VTU) at SIET, Tumakuru.
 
-**Guide:** Dr. Rajeswari R, Dept. of CSE
-**Team:** Abhilash KR, Anjanadri TN, Laxuman, Naveen L
-
----
-
-## What this project does
-
-1. **Wait-time prediction** — Random Forest ML model predicts how long a patient will wait, based on queue position, doctor's average consultation time, and current disruptions.
-2. **Leave-now notification** — combines Google Maps travel time with predicted wait time to tell patients exactly when to leave home.
-3. **Emergency priority queue** — staff can manually insert emergency patients; wait times for everyone else auto-recalculate.
+**Guide:** Dr. Rajeswari R, Dept. of CSE, SIET Tumakuru  
+**Team:** Abhilash KR, Anjanadri TN, Laxuman, Naveen L  
 
 ---
 
-## Current Implementation Status
+## 🌟 Core System Capabilities
 
-- ✅ **Phase 1 — Neon PostgreSQL Database Design:** 7 relational tables (`department`, `doctor`, `patient`, `symptommapping`, `staffuser`, `appointment`, `queuelog`) created & seeded.
-- ✅ **Phase 2 — Backend Core APIs:** JWT auth, doctor & department routing, appointment scheduling, and live queue length endpoints built in FastAPI.
-- ✅ **Phase 3 — ML Wait-Time Engine:** Random Forest Regressor (200 estimators, max depth 10, MAE 5.45 min) trained and deployed directly inside FastAPI.
-- ✅ **Phase 4 — Google Maps & Live Departure Optimization:** Haversine & Google Maps Distance Matrix switch implemented; `POST /departure-check` core decision algorithm (`should_leave = travel_time >= predicted_wait`) built and verified.
-- ✅ **Phase 6 — Staff Dashboard & Emergency Queue Control (Release v0.6.0):** Complete React + Vite staff portal on port 3001. Instant emergency triage insertion at Position #1 with atomic database queue bumping (+1) for regular patients, dynamic Random Forest ML wait recalculation, live queue controls ("Call Next", "Serve", "Complete", "Skip" no-shows), hospital operations KPIs, and AI symptom classifier.
-- ✅ **Phase 7 — Integration Testing, Disruption Handling & Post-Consultation Telemetry (Release v0.7.0):** Comprehensive end-to-end integration test suite (`test_phase7_integration.py`, 100% pass) validating the complete patient/hospital flow. Active doctor operational disruption buffers (+15m, +30m) dynamically injected into ML wait times and departure checks. Post-consultation evaluation logging (`queue_logs` table in Neon PostgreSQL) tracks predicted wait vs actual wait time with live accuracy telemetry on the Staff Dashboard.
+1. **Wait-Time Prediction (Machine Learning Engine):** Random Forest Regressor predicts how long a patient will wait based on live queue position, doctor consultation speeds, disruption delay buffers, day of week, and peak hours.
+2. **AI Smart Departure Advisor (Google Maps & Haversine):** Continuously balances real-time road travel duration against predicted OPD wait times, notifying patients exactly when to leave home to achieve a Zero-Wait arrival experience.
+3. **Dual-Channel Mobile Dispatch (WhatsApp + SMS):** Synchronously dispatches rich WhatsApp notification templates (with 1-click `wa.me` links, OPD tokens, doctor room numbers, and Google Maps directions) alongside concise GSM SMS messages to guarantee 100% notification reach.
+4. **Emergency Priority Queue Triage:** Hospital staff can immediately insert emergency walk-ins at Position #1 (`EMG-xxx`), dynamically bumping regular queues and recalculating downstream wait times in real-time.
+5. **Post-Consultation Evaluation Logging:** Live telemetry logs (`queue_logs` table in Neon Serverless PostgreSQL) tracking predicted vs actual consultation durations for model accuracy assessment.
 
 ---
 
-## Quick Start — Running the Full System
+## ⚡ Quick Start — Running the Full System (See [`run.md`](./run.md))
+
+For complete presentation instructions and demo credentials, refer to [`run.md`](./run.md).
 
 ### 1. Start the FastAPI Backend
 ```powershell
@@ -34,24 +28,24 @@ cd backend
 .\venv\Scripts\activate
 uvicorn main:app --reload --port 8000
 ```
-- API Documentation & Swagger UI: `http://localhost:8000/docs`
+- API Documentation & Swagger UI: [http://localhost:8000/docs](http://localhost:8000/docs)
+- Health Check: [http://localhost:8000/](http://localhost:8000/)
 
-### 2. Start the Patient React App
+### 2. Start the Patient React App (Shridevi MediFlow AI)
 ```powershell
 cd patient-app
-npm install
-npm run dev -- --port 3000
+npm run dev
 ```
-- Patient Web Application: `http://localhost:3000`
+- Patient Portal: [http://localhost:3000](http://localhost:3000)
 
-### 3. Start the Staff Dashboard
+### 3. Start the Staff & Doctor Dashboard (Shridevi Hospital Portal)
 ```powershell
 cd staff-dashboard
-npm install
-npm run dev -- --port 3001
+npm run dev
 ```
-- Staff Dashboard Web Application: `http://localhost:3001`
-- Default Login: Username `admin` | Password `admin` (or `reception1` / `admin`)
+- Staff Portal: [http://localhost:5173](http://localhost:5173) *(or check terminal if port 3001 is assigned)*
+- Staff Login: Username `admin` or `reception1` | Password `Staff@123`
+
 
 ---
 

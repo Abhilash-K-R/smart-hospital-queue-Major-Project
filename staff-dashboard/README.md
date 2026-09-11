@@ -1,14 +1,17 @@
-# Staff Dashboard
+# 🏥 Shridevi Hospital — Staff Queue Management Portal
+### Shridevi Hospital & Research Hospital, Sira Road, Tumakuru - 572106
 
-The Staff Dashboard is a React-based single-page application designed for hospital and clinic staff to manage daily operations, track patient queues, handle emergencies, and map patient symptoms.
+The staff and administration operations portal for **Shridevi Hospital**, providing real-time OPD triage, emergency priority insertion, doctor disruption buffering, and post-consultation ML wait-time telemetry.
 
 ## 🚀 Features
 
-- **Authentication:** Secure login and protected routes for staff members.
-- **Dashboard Overview:** Real-time metrics and data visualization using Recharts.
-- **Queue Management:** Tools for managing patient wait times and staff tasks.
-- **Emergency Alerts:** Dedicated module for high-priority incidents.
-- **Symptom Mapping:** Triage tool for mapping reported symptoms to potential conditions.
+- **Authentication:** Secure JWT login for receptionists, nurses, and hospital administrators.
+- **Live Queue Table:** Granular patient status actions ("Call Next", "Serve", "Complete", "Skip") with immediate database synchronization.
+- **Emergency Priority Intake:** Instant admission of acute emergency patients with automated Queue Position #1 assignment and downstream regular queue bumping.
+- **Doctor Disruption Buffering:** Real-time delay adjustments (+15m, +30m, On Break) dynamically propagating to patient departure algorithms and WhatsApp/SMS alerts.
+- **Post-Consultation Evaluation Logs:** ML model audit logs comparing predicted vs actual wait times (`queue_logs` table).
+- **AI Clinical Symptom Classifier:** Dynamic department-to-symptom mapping with percentage match confidence.
+
 
 ## 🛠️ Technology Stack
 
