@@ -314,7 +314,7 @@ class EmergencyInsertResponse(BaseModel):
 
 
 class QueueAdvanceRequest(BaseModel):
-    appointment_id: int
+    appointment_id: int | None = None
     action: str = "completed"  # 'completed', 'skipped', 'serving'
 
 

@@ -17,6 +17,7 @@ const Queue = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [actionMessage, setActionMessage] = useState('');
   const [isCallingNext, setIsCallingNext] = useState(false);
+  const [updatingId, setUpdatingId] = useState(null);
 
   const fetchQueue = async () => {
     try {
@@ -52,13 +53,17 @@ const Queue = () => {
   };
 
   const updateStatus = async (id, action) => {
+    setUpdatingId(`${id}-${action}`);
     try {
-      await api.put(`/staff/appointments/${id}/status`, { action });
+      await api.put(`/staff/appointments/${id}/status`, { appointment_id: id, action });
       setActionMessage(`Patient #${id} marked as ${action}`);
       await fetchQueue();
       setTimeout(() => setActionMessage(''), 3000);
     } catch (err) {
       console.error(`Error marking patient #${id} as ${action}:`, err);
+      setActionMessage(`Failed to update patient #${id}: ${err.response?.data?.detail || err.message}`);
+    } finally {
+      setUpdatingId(null);
     }
   };
 
@@ -171,21 +176,34 @@ const Queue = () => {
                   </td>
                   <td className="py-4 px-6 text-right">
                     <div className="flex items-center justify-end gap-2">
+                      {patient.status !== 'serving' && (
+                        <button 
+                          onClick={() => updateStatus(patient.id, 'serving')}
+                          disabled={!!updatingId}
+                          className="px-2.5 py-1 bg-blue-50 text-blue-700 hover:bg-blue-100 rounded-lg text-xs font-medium flex items-center gap-1 transition-colors border border-blue-200 disabled:opacity-50"
+                          title="Call into Consultation Room"
+                        >
+                          <PhoneForwarded className="h-3.5 w-3.5" />
+                          {updatingId === `${patient.id}-serving` ? 'Serving...' : 'Serve'}
+                        </button>
+                      )}
                       <button 
                         onClick={() => updateStatus(patient.id, 'completed')}
-                        className="px-2.5 py-1 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 rounded-lg text-xs font-medium flex items-center gap-1 transition-colors border border-emerald-200"
+                        disabled={!!updatingId}
+                        className="px-2.5 py-1 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 rounded-lg text-xs font-medium flex items-center gap-1 transition-colors border border-emerald-200 disabled:opacity-50"
                         title="Mark Consultation Completed"
                       >
                         <Check className="h-3.5 w-3.5" />
-                        Complete
+                        {updatingId === `${patient.id}-completed` ? 'Saving...' : 'Complete'}
                       </button>
                       <button 
                         onClick={() => updateStatus(patient.id, 'skipped')}
-                        className="px-2.5 py-1 bg-red-50 text-red-700 hover:bg-red-100 rounded-lg text-xs font-medium flex items-center gap-1 transition-colors border border-red-200"
+                        disabled={!!updatingId}
+                        className="px-2.5 py-1 bg-red-50 text-red-700 hover:bg-red-100 rounded-lg text-xs font-medium flex items-center gap-1 transition-colors border border-red-200 disabled:opacity-50"
                         title="Patient Absent / Skip"
                       >
                         <UserMinus className="h-3.5 w-3.5" />
-                        Skip
+                        {updatingId === `${patient.id}-skipped` ? 'Skipping...' : 'Skip'}
                       </button>
                     </div>
                   </td>

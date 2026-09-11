@@ -1074,16 +1074,35 @@ def update_appointment_status(appointment_id: int, req: QueueAdvanceRequest):
 
         prev_status = appt.status
         appt.status = req.action
-        session.add(appt)
 
-        # If marking as completed or skipped from pending/serving, advance queue atomically
-        if req.action in ["completed", "skipped"] and prev_status in ["pending", "serving"]:
+        if req.action == "serving":
+            # Mark any currently serving appointment for this doctor as completed
+            session.exec(
+                text(
+                    "UPDATE appointment SET status = 'completed' "
+                    "WHERE doctor_id = :doc_id AND status = 'serving' AND id != :curr_id"
+                ).params(doc_id=appt.doctor_id, curr_id=appt.id)
+            )
+            appt.queue_position = 0
+            session.add(appt)
+            # Advance other pending appointments forward
             session.exec(
                 text(
                     "UPDATE appointment SET queue_position = GREATEST(1, COALESCE(queue_position, 1) - 1) "
                     "WHERE doctor_id = :doc_id AND status = 'pending' AND id != :curr_id"
                 ).params(doc_id=appt.doctor_id, curr_id=appt.id)
             )
+        elif req.action in ["completed", "skipped"]:
+            appt.queue_position = None
+            session.add(appt)
+            # If was pending or serving, advance remaining queue forward
+            if prev_status in ["pending", "serving"]:
+                session.exec(
+                    text(
+                        "UPDATE appointment SET queue_position = GREATEST(1, COALESCE(queue_position, 1) - 1) "
+                        "WHERE doctor_id = :doc_id AND status = 'pending' AND id != :curr_id"
+                    ).params(doc_id=appt.doctor_id, curr_id=appt.id)
+                )
 
         session.commit()
         return {"success": True, "appointment_id": appointment_id, "new_status": req.action}
