@@ -15,6 +15,37 @@ AI-based system that predicts hospital wait times, sends "leave now" alerts base
 
 ---
 
+## Current Implementation Status
+
+- ✅ **Phase 1 — Neon PostgreSQL Database Design:** 7 relational tables (`department`, `doctor`, `patient`, `symptommapping`, `staffuser`, `appointment`, `queuelog`) created & seeded.
+- ✅ **Phase 2 — Backend Core APIs:** JWT auth, doctor & department routing, appointment scheduling, and live queue length endpoints built in FastAPI.
+- ✅ **Phase 3 — ML Wait-Time Engine:** Random Forest Regressor (200 estimators, max depth 10, MAE 5.45 min) trained and deployed directly inside FastAPI.
+- ✅ **Phase 4 — Google Maps & Live Departure Optimization:** Haversine & Google Maps Distance Matrix switch implemented; `POST /departure-check` core decision algorithm (`should_leave = travel_time >= predicted_wait`) built and verified.
+- ✅ **Phase 5 — Patient App Frontend Bridge (Release v0.4.0):** Complete React + Vite + Tailwind CSS patient app integrated with live backend. Real JWT token storage, real login/registration, live AI departure engine countdown, and 30-second queue auto-refresh verified end-to-end.
+- 🔄 **Phase 6 — Staff Dashboard & Emergency Queue Control:** Next phase (Naveen & team).
+
+---
+
+## Quick Start — Running the Full System
+
+### 1. Start the FastAPI Backend
+```powershell
+cd backend
+.\venv\Scripts\activate
+uvicorn main:app --reload --port 8000
+```
+- API Documentation & Swagger UI: `http://localhost:8000/docs`
+
+### 2. Start the Patient React App
+```powershell
+cd patient-app
+npm install
+npm run dev -- --port 3000
+```
+- Patient Web Application: `http://localhost:3000`
+
+---
+
 ## Tech stack
 
 | Layer      | Tech                                   |

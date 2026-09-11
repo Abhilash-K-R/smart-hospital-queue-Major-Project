@@ -149,4 +149,10 @@ All 5 planned endpoints built and verified via /docs: Auth, Doctors/Departments,
 - Guide: Dr. Rajeswari R (Dept. of CSE)
 - Team: Abhilash K R (Lead & ML/Backend), Laxuman Ghotale (Frontend UI/UX), Anjanadri T N (System/Cloud), Naveen L (Data/QA)
 - Location: Shridevi Hospital & Research Hospital, SIET Campus, Tumakuru
+
+### Release:
+- Tagged and released `v0.4.0` on GitHub: *"Release v0.4.0: Phase 4 Google Maps departure check and full patient-app frontend bridge integration"*.
+
+### What's next:
+- Phase 6: Staff dashboard queue management, live emergency triage insertion, and multi-doctor counter coordination (Naveen & team).
 

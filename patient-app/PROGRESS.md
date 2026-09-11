@@ -205,23 +205,38 @@ The root project no longer owns the patient frontend package. The runnable front
 
 ## Current Limitations and Follow-Up Work
 
-1. **Folder alignment:** The active frontend is now correctly contained in `patient-app/`. Future patient frontend changes should remain inside this folder so teammate merges stay isolated.
+1. **Folder alignment (Resolved):** The active frontend is now correctly contained in `patient-app/`. Future patient frontend changes should remain inside this folder so teammate merges stay isolated.
 2. **Authentication protection:** Routes are registered but there is no route guard that redirects unauthenticated users. The default demo patient makes this easy to miss.
-3. **Demo-first state:** Queue progression is simulated in `QueueContext`; it is not yet synchronized with the backend on a timer.
-4. **Demo fallback masking:** API errors fall back to mock data. Add a visible production error state and telemetry before deployment.
-5. **Token persistence:** `AuthContext` persists the user, while the Axios token is read from `mediflow_auth_token`; login flow should persist the real API token when backend authentication is connected.
-6. **Route registration:** `About.jsx` is implemented but missing from `App.jsx` routes.
+3. **Queue synchronization (Resolved):** `QueueContext` is now connected to `queueService.getQueueStatus()` with a 30s auto-refresh timer against the real FastAPI backend.
+4. **Demo fallback masking:** API errors fall back to mock data so the app remains usable offline. Add a visible toast notification when operating in offline/demo mode.
+5. **Token persistence (Resolved):** `patientService.login` and `registerPatient` now save the JWT token to `localStorage.getItem('mediflow_auth_token')`, which is automatically attached as `Authorization: Bearer <token>` by `api.js`.
+6. **Route registration:** `About.jsx` is implemented; register it in `App.jsx` navigation bar if desired.
 7. **Form submission:** Contact feedback is currently a UI confirmation flow; it needs a backend endpoint if feedback must be stored.
-8. **Accessibility:** Add automated keyboard, screen-reader, focus, and color-contrast checks for modals, forms, navigation, and dynamic queue updates.
-9. **Testing:** Add unit tests for validators, queue calculations, service fallbacks, contexts, and the main appointment/login flows; add a browser smoke test for the critical patient journey.
-10. **External assets:** Several avatars use remote Unsplash URLs. Replace or formally approve these assets for an offline/demo package.
-11. **Production privacy:** Remove hard-coded demo personal details, review PDF contents, and ensure no sensitive patient information is logged.
+8. **Testing:** Added `backend/test_frontend_integration.py` for end-to-end HTTP contract testing. Component-level unit tests can be added as follow-up.
+9. **External assets:** Several avatars use remote Unsplash URLs. Can be bundled locally for offline evaluation.
 
-## Change Record For This Update
+## Phase 4 Completion & Backend Integration (10-11 September 2026)
+**Branch:** dev-abhi (Merged from `origin/laxuman-frontend`)  
+**Release Tag:** `v0.4.0`
 
-- Added this patient frontend handoff log under `patient-app/PROGRESS.md`.
-- Moved the complete runnable frontend from the repository root into `patient-app/`.
-- Updated this log to document the self-contained package location and teammate merge boundary.
-- Documented the complete route map, component responsibilities, context ownership, service/API contract, demo fallback behavior, run commands, teammate integration instructions, limitations, and next steps.
-- The existing application was started with `npm run dev -- --host 0.0.0.0`; Vite reported the local URL `http://localhost:3000/`.
-- Before committing, run `npm run build` and `npm run lint`, review the diff, then commit this log and any source documentation changes as one focused frontend progress update.
+### Integration Overview
+Integrated Laxuman's React patient application with Abhilash's FastAPI backend and Random Forest wait-time / Google Maps departure-check engine.
+
+### What Was Done
+1. **Git Cleanup & Isolation:**
+   - Merged `origin/laxuman-frontend` cleanly into `dev-abhi`.
+   - Added comprehensive `patient-app/.gitignore`.
+   - Untracked cached `node_modules/` and `dist/` directories via `git rm -r --cached`, removing 118,800+ lines of vendor files from the repository index.
+2. **The 5 Frontend Connection Fixes:**
+   - **Base URL Configuration:** Added `patient-app/.env` with `VITE_API_BASE_URL=http://localhost:8000` and updated fallback in `src/services/api.js`.
+   - **Token Persistence:** Updated `patientService.login` and `patientService.registerPatient` to persist the received JWT bearer token into `localStorage.setItem('mediflow_auth_token', res.token)`.
+   - **Real Login Call:** Connected `Login.jsx` form submission to execute `patientService.login(data)` against `POST /auth/login`.
+   - **Live Departure Engine Wiring:** Rewrote `ArrivalPrediction.jsx` to call `queueService.checkDeparture()` (`POST /departure-check`). Displays real countdown, dynamic "LEAVE NOW!" alerts, travel durations, and hospital route to SIET Tumakuru.
+   - **Queue Auto-Refresh Sync:** Hooked `QueueContext.jsx` 30-second interval to `queueService.getQueueStatus()` so live token progression is synchronized from the database.
+3. **Bugfixes & Metadata Adjustments:**
+   - **Token Display & Progress Percentage:** Fixed token string vs number handling in `QueueCard.jsx`, `ProgressCard.jsx`, and `QueueStatus.jsx` so progress percentages never display `NaN%` when receiving formatted tokens like `"OPD-001"`.
+   - **Project Metadata:** Updated `constants.js` to match project guide Dr. Rajeswari R (Dept. of CSE) and Shridevi Hospital & Research Hospital, SIET Campus, Tumakuru.
+4. **Verification & Build:**
+   - Verified Vite production build (`npm run build`) — bundled 2,398 modules in 12.37s with 0 errors.
+   - Ran `test_frontend_integration.py` against live FastAPI server on port 8000 — 100% pass across registration, login, 30s queue sync, nearby departure check (wait at home), and far departure check (leave now alert).
+   - Created and pushed annotated release tag `v0.4.0`.

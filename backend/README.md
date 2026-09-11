@@ -27,7 +27,8 @@ A local copy of our backend that:
   - Queue status — `GET /appointments/{id}/queue-status`
 - ✅ **Phase 3 — ML Model:** Complete. Random Forest wait-time prediction model trained (200 estimators, max depth 10) and wired into FastAPI as `POST /predict-wait`. Matches paper's core finding — Random Forest significantly outperforms Linear Regression baseline. Model files (`wait_time_model.pkl`, `model_columns.pkl`) committed directly to `backend/`.
 - ✅ **Phase 4 — Google Maps + Departure Notification:** Complete. Haversine mock and Google Maps Distance Matrix switch implemented in `travel_time.py`. Added `/departure-check` core decision algorithm (`should_leave = travel_time >= predicted_wait`), added CORS middleware, added frontend bridge routes (`/auth/login`, `/patients/register`, `/queue/status/{token}`, `/calculate-departure`, `/ai/predict-arrival`, `/notifications`). Verified 100% pass via `test_departure_check.py`.
-- 🔄 **Phase 5 — Patient App Integration:** In progress.
+- ✅ **Phase 5 — Patient App Integration (v0.4.0):** Complete. Merged `laxuman-frontend` into `dev-abhi`. Untracked cached vendor files (`node_modules`/`dist`). Connected real JWT token storage, hooked real login API, wired live departure-check into `ArrivalPrediction.jsx`, synchronized 30s queue status auto-refresh in `QueueContext.jsx`, fixed token rendering bug, and validated 100% pass via `test_frontend_integration.py` and Vite build (`npm run build`). Tagged and released `v0.4.0`.
+- 🔄 **Phase 6 — Staff Dashboard & Emergency Queue Control:** Next phase (Naveen & team).
 
 See `PROGRESS.md` in this folder for detailed session-by-session logs.
 
