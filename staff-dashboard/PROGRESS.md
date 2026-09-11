@@ -139,3 +139,9 @@ We completed the full frontend implementation and live backend integration of th
    - Ran `npm run build` — 213 dependencies resolved, clean bundle built in 15.69s with 0 errors.
    - Verified running concurrently with `patient-app` on port 3000 and FastAPI on port 8000.
 
+7. **Live Queue Table Action Controls & Status Updates:**
+   - Fortified `updateStatus()` in `Queue.jsx` to pass `{ appointment_id: id, action }` payload, resolving backend 422 validation.
+   - Added immediate visual loading feedback on action buttons (`Saving...`, `Skipping...`, `Serving...`) with disabled state during in-flight network requests to prevent duplicate submissions.
+   - Added per-row **"Serve"** button for waiting patients alongside **"Complete"** and **"Skip"**, providing granular triage flow directly from the queue table.
+   - Verified that marking a patient as completed or skipped immediately clears them from the active queue table and promotes subsequent patients forward.
+

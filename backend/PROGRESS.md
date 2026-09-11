@@ -178,6 +178,14 @@ All 5 planned endpoints built and verified via /docs: Auth, Doctors/Departments,
    - Created `test_phase6_staff.py`: 100% pass across all 8 staff routes.
    - Created `test_cross_system_flow.py`: Proved project novelty end-to-end. Inserting an acute trauma emergency patient dynamically shifted regular patient queue position (8 -> 9), increased predicted wait time (172.9m -> 178.3m), and pushed back the patient's departure time (159m -> 163m remaining buffer).
 
+5. **Queue Action & Status Transition Fortification:**
+   - Fixed `422 Unprocessable Entity` error on `PUT /staff/appointments/{id}/status` by making `appointment_id` optional in `QueueAdvanceRequest` (since the ID is supplied in the URL path).
+   - Handled full lifecycle state transitions:
+     - `completed`: Removes patient from active waiting/serving queue (`queue_position = None`), advances subsequent pending patients forward.
+     - `skipped`: Marks absent patient as skipped and shifts subsequent queue forward.
+     - `serving`: Marks any existing serving patient for the doctor as completed, places current patient at Position 0, and advances remaining queue.
+   - Normalized staff login to seamlessly accept email formats (e.g. `admin@hospital.com`) as well as usernames (`admin`).
+
 ### Phase 6 — COMPLETE
 All staff control endpoints and cross-system dynamic queue shifting fully built, tested, and verified.
 
