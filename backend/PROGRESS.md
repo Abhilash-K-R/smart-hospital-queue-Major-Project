@@ -189,4 +189,35 @@ All 5 planned endpoints built and verified via /docs: Auth, Doctors/Departments,
 ### Phase 6 — COMPLETE
 All staff control endpoints and cross-system dynamic queue shifting fully built, tested, and verified.
 
+## Phase 7 — End-to-End Integration Testing & Disruption Handling (11 September 2026)
+**Branch:** dev-abhi
+**Release:** v0.7.0
+
+### What was done
+1. **Doctor Disruption & Operational Delay Buffering:**
+   - Added active doctor operational delay tracking dictionary in `main.py`.
+   - Updated `schemas.py`: `DoctorStatusUpdateRequest` with `delay_minutes: int | None = 0` and `status: str = "Active"`.
+   - Updated `PUT /staff/doctors/{id}/status` and `GET /staff/doctors` to record, return, and clear doctor delays.
+   - Wired `calculate_predicted_wait`, `get_frontend_queue_status`, and `POST /departure-check` to seamlessly inject active delay buffers, immediately delaying the patient's departure advisory when a doctor is delayed (e.g. emergency surgery).
+2. **Post-Consultation Logging (QueueLog Table in Neon PostgreSQL):**
+   - Wired `call_next_patient` and `update_appointment_status` (`action == "completed"`) to calculate `actual_wait = (now - booked_time).total_seconds() / 60.0` and insert an audit row into `QueueLog(appointment_id, predicted_wait, actual_wait, timestamp)`.
+   - Built `GET /staff/queue-logs` returning historical consultation logs with model delta, average predicted wait, and average actual wait (fulfilling Section 4.5 of research paper on post-consultation tracking).
+3. **Database & Connection Pooling Hardening:**
+   - Configured `connect_args` in `database.py` with TCP keepalives (`keepalives: 1`, `keepalives_idle: 30`, `keepalives_interval: 10`, `keepalives_count: 5`) and increased pool size (`pool_size=10, max_overflow=20`) to eliminate SSL socket closure issues with Neon serverless proxy.
+   - Safeguarded against `None` queue positions in `Appointment.queue_position < ...` comparisons across `/queue-status`, `/departure-check`, and `/queue/status/{token}`.
+4. **Staff Dashboard Frontend Telemetry:**
+   - Enhanced `staff-dashboard/src/pages/Dashboard.jsx` with a Doctor Disruption & Delay Management panel (quick toggles: Active, +15m Delay, +30m Delay, Break).
+   - Added Post-Consultation Wait-Time Evaluation Logs table showing live ML predicted wait vs actual patient wait times and accuracy deltas.
+5. **Comprehensive Integration Test Suite:**
+   - Created `test_phase7_integration.py` covering all 6 stages:
+     1. Patient registration & home departure check.
+     2. Acute emergency triage insertion & dynamic queue bumping (+1 position).
+     3. Doctor operational disruption (+20m delay buffer propagation).
+     4. Queue advancement through serving and completed.
+     5. Post-consultation audit rows verified in Neon `queue_logs`.
+     6. Edge-case resilience (empty queue call, unknown tokens, doctor status reset).
+   - Executed and achieved **100% PASS** across all assertions (exit code 0).
+
+### Phase 7 — COMPLETE
+Full cross-system integration, real-world hospital disruption handling, and post-consultation ML evaluation logging verified end-to-end.
 

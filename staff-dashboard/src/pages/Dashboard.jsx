@@ -1,5 +1,8 @@
 import React, { useState, useEffect } from 'react';
-import { Users, UserPlus, Clock, Activity, AlertCircle, CheckCircle2, ShieldAlert } from 'lucide-react';
+import { 
+  Users, UserPlus, Clock, Activity, AlertCircle, CheckCircle2, ShieldAlert, 
+  Stethoscope, AlertTriangle, RefreshCw, BarChart2 
+} from 'lucide-react';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import api from '../services/api';
 
@@ -39,10 +42,13 @@ const Dashboard = () => {
     currently_waiting: 5,
     avg_wait_minutes: 22.5,
     active_doctors: 2,
-    emergency_count: 1,
+    emergency_count: 0,
     recent_activity: [],
   });
+  const [doctors, setDoctors] = useState([]);
+  const [queueLogs, setQueueLogs] = useState({ total: 0, avg_actual_wait: null, avg_predicted_wait: null, logs: [] });
   const [loading, setLoading] = useState(true);
+  const [updatingDoctorId, setUpdatingDoctorId] = useState(null);
   const [lastUpdated, setLastUpdated] = useState('Just now');
 
   const fetchStats = async () => {
@@ -59,11 +65,55 @@ const Dashboard = () => {
     }
   };
 
+  const fetchDoctors = async () => {
+    try {
+      const res = await api.get('/staff/doctors');
+      if (res.data) {
+        setDoctors(res.data);
+      }
+    } catch (err) {
+      console.error('Error fetching doctors:', err);
+    }
+  };
+
+  const fetchQueueLogs = async () => {
+    try {
+      const res = await api.get('/staff/queue-logs?limit=8');
+      if (res.data) {
+        setQueueLogs(res.data);
+      }
+    } catch (err) {
+      console.error('Error fetching queue logs:', err);
+    }
+  };
+
   useEffect(() => {
     fetchStats();
-    const interval = setInterval(fetchStats, 8000);
+    fetchDoctors();
+    fetchQueueLogs();
+    const interval = setInterval(() => {
+      fetchStats();
+      fetchDoctors();
+      fetchQueueLogs();
+    }, 8000);
     return () => clearInterval(interval);
   }, []);
+
+  const handleDoctorStatusChange = async (doctorId, status, delayMinutes) => {
+    setUpdatingDoctorId(doctorId);
+    try {
+      await api.put(`/staff/doctors/${doctorId}/status`, {
+        status,
+        delay_minutes: delayMinutes,
+      });
+      await fetchDoctors();
+      await fetchStats();
+    } catch (err) {
+      console.error('Failed to update doctor status:', err);
+    } finally {
+      setUpdatingDoctorId(null);
+    }
+  };
 
   const activities = stats.recent_activity.length > 0 ? stats.recent_activity : [
     { id: 1, text: 'Cardiology OPD Active (Dr. Priya Sharma)', time: '5m ago', type: 'info' },
@@ -111,6 +161,100 @@ const Dashboard = () => {
         <StatCard title="Currently Waiting" value={stats.currently_waiting} icon={Clock} trend="Live" subtitle="Active in OPD Queue" />
         <StatCard title="Average Wait Time" value={`${stats.avg_wait_minutes}m`} icon={Activity} trend="AI Predicted" subtitle="Random Forest ML" />
         <StatCard title="Active OPD Doctors" value={stats.active_doctors} icon={UserPlus} trend="Online" subtitle="Available Consultation" />
+      </div>
+
+      {/* Doctor Disruption & Operational Delay Controls */}
+      <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
+        <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center gap-2">
+            <div className="p-2 bg-amber-50 text-amber-600 rounded-lg">
+              <Stethoscope className="h-5 w-5" />
+            </div>
+            <div>
+              <h2 className="text-lg font-bold text-slate-900">Doctor Disruption & Delay Management</h2>
+              <p className="text-xs text-slate-500">Flag operational disruptions (surgeries, emergencies) to automatically recalculate patient departure buffers</p>
+            </div>
+          </div>
+          <span className="text-xs font-semibold text-slate-500 bg-slate-100 px-2.5 py-1 rounded-full">
+            {doctors.length} Doctors Registered
+          </span>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 mt-2">
+          {doctors.map((doc) => {
+            const isDelayed = doc.status === 'Delayed' || (doc.delay_minutes > 0);
+            const isOnBreak = doc.status === 'On Break';
+
+            return (
+              <div 
+                key={doc.id} 
+                className={`p-4 rounded-xl border transition-all ${
+                  isDelayed ? 'bg-amber-50/60 border-amber-300 shadow-sm' :
+                  isOnBreak ? 'bg-slate-50 border-slate-300' :
+                  'bg-white border-slate-200 hover:border-blue-200'
+                }`}
+              >
+                <div className="flex items-start justify-between mb-2">
+                  <div>
+                    <h3 className="font-bold text-slate-900 text-sm">{doc.name}</h3>
+                    <p className="text-xs text-slate-500">{doc.department}</p>
+                  </div>
+                  <span className={`text-[11px] font-bold px-2 py-0.5 rounded-full ${
+                    isDelayed ? 'bg-amber-200 text-amber-900 animate-pulse' :
+                    isOnBreak ? 'bg-slate-200 text-slate-700' :
+                    'bg-emerald-100 text-emerald-800'
+                  }`}>
+                    {isDelayed ? `Delayed (+${doc.delay_minutes || 15}m)` : doc.status || 'Active'}
+                  </span>
+                </div>
+
+                <div className="flex items-center justify-between text-xs text-slate-600 my-3 bg-white/70 p-2 rounded-lg border border-slate-100">
+                  <span>Waiting: <strong className="text-slate-800">{doc.queue_length}</strong> patients</span>
+                  <span>Avg Consult: <strong className="text-slate-800">{doc.avg_consult_minutes}m</strong></span>
+                </div>
+
+                <div className="flex items-center gap-1.5 pt-1">
+                  <button
+                    disabled={updatingDoctorId === doc.id}
+                    onClick={() => handleDoctorStatusChange(doc.id, 'Active', 0)}
+                    className={`flex-1 py-1 px-2 text-[11px] font-semibold rounded transition-colors ${
+                      !isDelayed && !isOnBreak ? 'bg-emerald-600 text-white' : 'bg-slate-100 hover:bg-slate-200 text-slate-700'
+                    }`}
+                  >
+                    Active
+                  </button>
+                  <button
+                    disabled={updatingDoctorId === doc.id}
+                    onClick={() => handleDoctorStatusChange(doc.id, 'Delayed', 15)}
+                    className={`flex-1 py-1 px-2 text-[11px] font-semibold rounded transition-colors ${
+                      isDelayed && doc.delay_minutes === 15 ? 'bg-amber-600 text-white' : 'bg-amber-100 hover:bg-amber-200 text-amber-800'
+                    }`}
+                  >
+                    +15m
+                  </button>
+                  <button
+                    disabled={updatingDoctorId === doc.id}
+                    onClick={() => handleDoctorStatusChange(doc.id, 'Delayed', 30)}
+                    className={`flex-1 py-1 px-2 text-[11px] font-semibold rounded transition-colors ${
+                      isDelayed && doc.delay_minutes === 30 ? 'bg-amber-600 text-white' : 'bg-amber-100 hover:bg-amber-200 text-amber-800'
+                    }`}
+                  >
+                    +30m
+                  </button>
+                  <button
+                    disabled={updatingDoctorId === doc.id}
+                    onClick={() => handleDoctorStatusChange(doc.id, 'On Break', 0)}
+                    className={`flex-1 py-1 px-2 text-[11px] font-semibold rounded transition-colors ${
+                      isOnBreak ? 'bg-slate-700 text-white' : 'bg-slate-100 hover:bg-slate-200 text-slate-700'
+                    }`}
+                  >
+                    Break
+                  </button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -185,6 +329,79 @@ const Dashboard = () => {
             Manage Live Queue
           </a>
         </div>
+      </div>
+
+      {/* Post-Consultation Model Audit (Queue Logs - Section 4.5 of Research Paper) */}
+      <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
+        <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center gap-2">
+            <div className="p-2 bg-indigo-50 text-indigo-600 rounded-lg">
+              <BarChart2 className="h-5 w-5" />
+            </div>
+            <div>
+              <h2 className="text-lg font-bold text-slate-900">Post-Consultation Wait-Time Evaluation Logs</h2>
+              <p className="text-xs text-slate-500">Live comparison of ML Random Forest predicted wait vs actual patient wait times (Section 4.5 model tracking)</p>
+            </div>
+          </div>
+          {queueLogs.total > 0 && (
+            <div className="flex items-center gap-4 text-xs">
+              <div className="bg-blue-50 border border-blue-200 px-3 py-1 rounded-lg">
+                <span className="text-slate-500">Avg Predicted: </span>
+                <strong className="text-blue-700 font-bold">{queueLogs.avg_predicted_wait}m</strong>
+              </div>
+              <div className="bg-emerald-50 border border-emerald-200 px-3 py-1 rounded-lg">
+                <span className="text-slate-500">Avg Actual: </span>
+                <strong className="text-emerald-700 font-bold">{queueLogs.avg_actual_wait}m</strong>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {queueLogs.logs.length === 0 ? (
+          <div className="text-center py-8 text-slate-400 text-sm">
+            No completed consultation logs recorded yet today. Complete consultations in the Live Queue to generate accuracy benchmarks.
+          </div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-xs">
+              <thead>
+                <tr className="border-b border-slate-200 text-slate-500 font-medium bg-slate-50">
+                  <th className="py-2.5 px-3">Log ID</th>
+                  <th className="py-2.5 px-3">Appointment ID</th>
+                  <th className="py-2.5 px-3">Predicted Wait</th>
+                  <th className="py-2.5 px-3">Actual Wait</th>
+                  <th className="py-2.5 px-3">Model Delta</th>
+                  <th className="py-2.5 px-3">Timestamp</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {queueLogs.logs.map((log) => {
+                  const delta = log.actual_wait != null ? Math.abs(log.predicted_wait - log.actual_wait).toFixed(1) : '-';
+                  const isAccurate = log.actual_wait != null && Math.abs(log.predicted_wait - log.actual_wait) <= 5.0;
+
+                  return (
+                    <tr key={log.id} className="hover:bg-slate-50">
+                      <td className="py-2 px-3 font-semibold text-slate-700">#{log.id}</td>
+                      <td className="py-2 px-3 text-slate-600">Appt #{log.appointment_id}</td>
+                      <td className="py-2 px-3 font-medium text-blue-600">{log.predicted_wait} min</td>
+                      <td className="py-2 px-3 font-medium text-slate-900">{log.actual_wait != null ? `${log.actual_wait} min` : 'In Progress'}</td>
+                      <td className="py-2 px-3">
+                        <span className={`px-2 py-0.5 rounded font-semibold text-[11px] ${
+                          isAccurate ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'
+                        }`}>
+                          ±{delta}m {isAccurate ? '✓ High' : '• Acceptable'}
+                        </span>
+                      </td>
+                      <td className="py-2 px-3 text-slate-400">
+                        {log.timestamp ? new Date(log.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'Recent'}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
     </div>
   );

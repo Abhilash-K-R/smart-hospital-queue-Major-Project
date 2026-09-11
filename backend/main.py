@@ -23,7 +23,7 @@ from dotenv import load_dotenv
 import os
 
 from travel_time import get_travel_time_minutes
-from models import Patient, Department, Doctor, SymptomMapping, Appointment, StaffUser
+from models import Patient, Department, Doctor, SymptomMapping, Appointment, StaffUser, QueueLog
 from schemas import (
     PatientSignupRequest, PatientResponse, LoginRequest, TokenResponse,
     DepartmentResponse, DoctorResponse,
@@ -39,7 +39,12 @@ from schemas import (
     StaffQueueItem, EmergencyInsertRequest, EmergencyInsertResponse,
     QueueAdvanceRequest, DoctorStatusUpdateRequest, StaffStatsResponse,
     SymptomAnalyzeRequest, SymptomAnalyzeResponse, SymptomAnalyzeResult,
+    QueueLogItem, QueueLogResponse,
 )
+
+# Phase 7: Track doctor live operational status and active delay buffers (in minutes)
+# Format: {doctor_id: {"status": "Delayed" | "Active" | "On Break", "delay_minutes": int}}
+doctor_delays: dict[int, dict] = {}
 
 
 from ml_predictor import predict_wait
@@ -295,14 +300,14 @@ def get_queue_status(
         if appointment.patient_id != patient_id:
             raise HTTPException(status_code=403, detail="Not your appointment")
 
-        # Count pending appointments for the same doctor, booked BEFORE
-        # this one — that's how many people are genuinely ahead in line.
+        # Count pending appointments for the same doctor ahead of this one
+        appt_pos = appointment.queue_position if appointment.queue_position is not None else 999
         patients_ahead = len(
             session.exec(
                 select(Appointment).where(
                     Appointment.doctor_id == appointment.doctor_id,
                     Appointment.status == "pending",
-                    Appointment.queue_position < appointment.queue_position,
+                    Appointment.queue_position < appt_pos,
                 )
             ).all()
         )
@@ -383,12 +388,13 @@ def check_departure_time(
         department_name = department.name if department else ""
 
         # Count real-time patients ahead, same logic as queue-status endpoint
+        appt_pos = appointment.queue_position if appointment.queue_position is not None else 999
         patients_ahead = len(
             session.exec(
                 select(Appointment).where(
                     Appointment.doctor_id == appointment.doctor_id,
                     Appointment.status == "pending",
-                    Appointment.queue_position < appointment.queue_position,
+                    Appointment.queue_position < appt_pos,
                 )
             ).all()
         )
@@ -411,7 +417,12 @@ def check_departure_time(
             queue_length_ahead=patients_ahead,
             patient_type="normal",
         )
-        predicted_wait = prediction["predicted_minutes"]
+        predicted_wait = float(prediction["predicted_minutes"])
+
+        # Phase 7: Add doctor delay buffer if doctor is flagged as Delayed or has delay_minutes
+        if doctor.id in doctor_delays:
+            delay_mins = doctor_delays[doctor.id].get("delay_minutes", 0)
+            predicted_wait = round(predicted_wait + delay_mins, 1)
 
         travel_time = get_travel_time_minutes(
             request.patient_lat, request.patient_lng, HOSPITAL_LAT, HOSPITAL_LNG
@@ -615,19 +626,21 @@ def get_frontend_queue_status(token_identifier: str):
         doctor = session.get(Doctor, appointment.doctor_id)
         department = session.get(Department, doctor.department_id) if doctor else None
 
+        appt_pos = appointment.queue_position if appointment.queue_position is not None else 999
         patients_ahead = len(
             session.exec(
                 select(Appointment).where(
                     Appointment.doctor_id == appointment.doctor_id,
                     Appointment.status == "pending",
-                    Appointment.queue_position < appointment.queue_position,
+                    Appointment.queue_position < appt_pos,
                 )
             ).all()
         )
 
         current_num = max(1, (appointment.queue_position or 1) - patients_ahead)
         avg_consult = doctor.avg_consult_minutes if doctor else 15
-        est_wait = round(patients_ahead * avg_consult * 0.9, 1)
+        delay_buf = doctor_delays.get(doctor.id, {}).get("delay_minutes", 0) if doctor else 0
+        est_wait = round(patients_ahead * avg_consult * 0.9 + delay_buf, 1)
 
         now_str = datetime.utcnow().strftime("%I:%M %p")
 
@@ -848,6 +861,10 @@ def staff_login(req: StaffLoginRequest):
 
 
 def calculate_predicted_wait(doctor, department_name: str, queue_pos: int, patient_type: str = "normal") -> float:
+    delay_buf = 0
+    if doctor and doctor.id in doctor_delays:
+        delay_buf = doctor_delays[doctor.id].get("delay_minutes", 0)
+
     try:
         now = datetime.utcnow()
         doc_code = f"DOC{doctor.id}" if doctor else "DOC1"
@@ -861,10 +878,10 @@ def calculate_predicted_wait(doctor, department_name: str, queue_pos: int, patie
             queue_length_ahead=max(0, queue_pos - 1),
             patient_type=patient_type,
         )
-        return float(pred["predicted_minutes"])
+        return round(float(pred["predicted_minutes"]) + delay_buf, 1)
     except Exception:
         avg_mins = doctor.avg_consult_minutes if doctor else 15
-        return float(max(1, queue_pos) * avg_mins)
+        return round(float(max(1, queue_pos) * avg_mins) + delay_buf, 1)
 
 
 @app.get("/staff/queue", response_model=List[StaffQueueItem])
@@ -1031,7 +1048,27 @@ def call_next_patient(doctor_id: Optional[int] = None):
 
         if current_serving:
             current_serving.status = "completed"
+            current_serving.queue_position = None
             session.add(current_serving)
+
+            # Phase 7: Record QueueLog row for completed consultation
+            now = datetime.utcnow()
+            booked = current_serving.booked_time or now
+            actual_wait = max(1.0, round((now - booked).total_seconds() / 60.0, 1))
+            try:
+                doc = session.get(Doctor, current_serving.doctor_id)
+                dept_name = "Cardiology" if (doc and doc.department_id == 1) else "General Medicine"
+                pred_wait = calculate_predicted_wait(doc, dept_name, 1)
+            except Exception:
+                pred_wait = 18.0
+
+            log_entry = QueueLog(
+                appointment_id=current_serving.id,
+                predicted_wait=pred_wait,
+                actual_wait=actual_wait,
+                timestamp=now,
+            )
+            session.add(log_entry)
 
         # Find next pending appointment
         next_pending = session.exec(
@@ -1095,6 +1132,27 @@ def update_appointment_status(appointment_id: int, req: QueueAdvanceRequest):
         elif req.action in ["completed", "skipped"]:
             appt.queue_position = None
             session.add(appt)
+
+            # Phase 7: Record QueueLog row when consultation completes
+            if req.action == "completed":
+                now = datetime.utcnow()
+                booked = appt.booked_time or now
+                actual_wait = max(1.0, round((now - booked).total_seconds() / 60.0, 1))
+                try:
+                    doc = session.get(Doctor, appt.doctor_id)
+                    dept_name = "Cardiology" if (doc and doc.department_id == 1) else "General Medicine"
+                    pred_wait = calculate_predicted_wait(doc, dept_name, 1)
+                except Exception:
+                    pred_wait = 18.0
+
+                log_entry = QueueLog(
+                    appointment_id=appt.id,
+                    predicted_wait=pred_wait,
+                    actual_wait=actual_wait,
+                    timestamp=now,
+                )
+                session.add(log_entry)
+
             # If was pending or serving, advance remaining queue forward
             if prev_status in ["pending", "serving"]:
                 session.exec(
@@ -1188,7 +1246,7 @@ def get_staff_stats():
 
 @app.get("/staff/doctors")
 def get_staff_doctors():
-    """Returns all doctors with live queue length and status."""
+    """Returns all doctors with live queue length, status, and active delay buffer."""
     with Session(engine) as session:
         doctors = session.exec(select(Doctor)).all()
         departments = {dept.id: dept.name for dept in session.exec(select(Department)).all()}
@@ -1197,12 +1255,14 @@ def get_staff_doctors():
             waiting = session.exec(
                 select(Appointment).where(Appointment.doctor_id == d.id, Appointment.status == "pending")
             ).all()
+            doc_state = doctor_delays.get(d.id, {"status": "Active", "delay_minutes": 0})
             result.append({
                 "id": d.id,
                 "name": d.name,
                 "department": departments.get(d.department_id, "General Medicine"),
                 "avg_consult_minutes": d.avg_consult_minutes,
-                "status": "Active",
+                "status": doc_state.get("status", "Active"),
+                "delay_minutes": doc_state.get("delay_minutes", 0),
                 "queue_length": len(waiting),
             })
         return result
@@ -1210,7 +1270,7 @@ def get_staff_doctors():
 
 @app.put("/staff/doctors/{doctor_id}/status")
 def update_doctor_status(doctor_id: int, req: DoctorStatusUpdateRequest):
-    """Updates doctor consultation duration or status."""
+    """Updates doctor consultation duration, operational status, or delay buffer."""
     with Session(engine) as session:
         doc = session.get(Doctor, doctor_id)
         if not doc:
@@ -1219,7 +1279,47 @@ def update_doctor_status(doctor_id: int, req: DoctorStatusUpdateRequest):
             doc.avg_consult_minutes = req.avg_consult_minutes
             session.add(doc)
             session.commit()
-        return {"success": True, "doctor_id": doctor_id, "status": req.status, "avg_consult_minutes": doc.avg_consult_minutes}
+
+        doctor_delays[doctor_id] = {
+            "status": req.status,
+            "delay_minutes": req.delay_minutes or 0,
+        }
+        return {
+            "success": True,
+            "doctor_id": doctor_id,
+            "status": req.status,
+            "delay_minutes": req.delay_minutes or 0,
+            "avg_consult_minutes": doc.avg_consult_minutes,
+        }
+
+
+@app.get("/staff/queue-logs", response_model=QueueLogResponse)
+def get_queue_logs(limit: int = 50):
+    """
+    Returns historical consultation audit logs comparing ML predicted wait vs actual wait time.
+    Fulfills Section 4.5 of research paper on post-consultation tracking.
+    """
+    with Session(engine) as session:
+        logs = session.exec(select(QueueLog).order_by(QueueLog.timestamp.desc()).limit(limit)).all()
+        total = len(logs)
+        avg_actual = round(sum(l.actual_wait for l in logs if l.actual_wait is not None) / total, 1) if total > 0 else None
+        avg_pred = round(sum(l.predicted_wait for l in logs) / total, 1) if total > 0 else None
+
+        return QueueLogResponse(
+            total=total,
+            avg_actual_wait=avg_actual,
+            avg_predicted_wait=avg_pred,
+            logs=[
+                QueueLogItem(
+                    id=l.id,
+                    appointment_id=l.appointment_id,
+                    predicted_wait=l.predicted_wait,
+                    actual_wait=l.actual_wait,
+                    timestamp=l.timestamp.isoformat() if l.timestamp else None,
+                )
+                for l in logs
+            ],
+        )
 
 
 @app.post("/staff/symptom-analyze", response_model=SymptomAnalyzeResponse)

@@ -145,3 +145,24 @@ We completed the full frontend implementation and live backend integration of th
    - Added per-row **"Serve"** button for waiting patients alongside **"Complete"** and **"Skip"**, providing granular triage flow directly from the queue table.
    - Verified that marking a patient as completed or skipped immediately clears them from the active queue table and promotes subsequent patients forward.
 
+---
+
+## Phase 7 — Doctor Disruption Management & Post-Consultation Model Telemetry
+**Date:** 11 September 2026  
+**Branch:** `dev-abhi`  
+**Owner:** Naveen & Abhilash  
+
+### What was built/fixed today
+Enhanced the Staff Operations Dashboard (`staff-dashboard`) with live doctor disruption controls and post-consultation evaluation logging:
+
+1. **Doctor Disruption & Delay Management UI (`src/pages/Dashboard.jsx`):**
+   - Added an operational controls card displaying all registered OPD doctors, their current queue load, and consultation speeds.
+   - Status indicators dynamically distinguish between `Active` (green badge), `Delayed (+Xm)` (amber pulsing badge), and `On Break` (slate badge).
+   - One-click delay adjustment buttons (`Active`, `+15m`, `+30m`, `Break`) that call `PUT /staff/doctors/{id}/status`, allowing hospital triage staff to immediately buffer doctor delays (e.g. emergency surgeries or complex OPD cases).
+   - Buffer dynamically propagates to the patient app's departure alert system in real-time.
+
+2. **Post-Consultation Evaluation & Model Audit Telemetry (`src/pages/Dashboard.jsx`):**
+   - Added a dedicated evaluation table connected to `GET /staff/queue-logs`.
+   - Real-time display of completed consultations comparing ML Random Forest predicted wait vs actual patient wait times.
+   - Computes live accuracy metrics: Model Delta variance, accuracy tier (`✓ High` within ±5 min, `• Acceptable`), and KPI summary cards for Average Predicted Wait vs Average Actual Wait.
+   - Fulfills Section 4.5 of project evaluation metrics.

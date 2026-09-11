@@ -319,8 +319,28 @@ class QueueAdvanceRequest(BaseModel):
 
 
 class DoctorStatusUpdateRequest(BaseModel):
-    status: str  # 'Active', 'On Break', 'Delayed'
+    status: str = "Active"  # 'Active', 'On Break', 'Delayed'
     avg_consult_minutes: int | None = None
+    delay_minutes: int | None = 0
+
+
+# ---------------------------------------------------------------------
+# PHASE 7: QUEUE LOGGING & MODEL EVALUATION SCHEMAS
+# ---------------------------------------------------------------------
+
+class QueueLogItem(BaseModel):
+    id: int | None = None
+    appointment_id: int
+    predicted_wait: float
+    actual_wait: float | None = None
+    timestamp: str | None = None
+
+
+class QueueLogResponse(BaseModel):
+    total: int
+    avg_actual_wait: float | None = None
+    avg_predicted_wait: float | None = None
+    logs: list[QueueLogItem]
 
 
 class StaffStatsResponse(BaseModel):
