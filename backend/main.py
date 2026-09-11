@@ -25,15 +25,12 @@ import os
 from travel_time import get_travel_time_minutes
 from models import Patient, Department, Doctor, SymptomMapping, Appointment, StaffUser, QueueLog
 from schemas import (
-    PatientSignupRequest, PatientResponse, LoginRequest, TokenResponse,
     DepartmentResponse, DoctorResponse,
     SymptomMappingResponse, SymptomMappingUpdateRequest,
     AppointmentCreateRequest, AppointmentResponse,
-    QueueStatusResponse, 
-    PredictWaitRequest, PredictWaitResponse,
     DepartureCheckRequest, DepartureCheckResponse,
     FrontendLoginRequest, FrontendLoginResponse, FrontendRegisterRequest,
-    FrontendQueueStatusResponse, CalculateDepartureRequest, PredictArrivalResponse,
+    FrontendQueueStatusResponse,
     NotificationItem,
     StaffLoginRequest, StaffLoginResponse,
     StaffQueueItem, EmergencyInsertRequest, EmergencyInsertResponse,
@@ -78,62 +75,7 @@ def read_root():
     return {"status": "alive", "db_configured": os.getenv("DATABASE_URL") is not None}
 
 
-@app.post("/signup/patient", response_model=PatientResponse)
-def signup_patient(request: PatientSignupRequest):
-    """
-    Creates a new patient account.
-    Steps:
-      1. Check email isn't already registered.
-      2. Hash the password (never store it plain).
-      3. Save the new patient row.
-      4. Return the patient's public info (no password_hash).
-    """
-    with Session(engine) as session:
-        # Check for an existing account with this email
-        existing = session.exec(
-            select(Patient).where(Patient.email == request.email)
-        ).first()
 
-        if existing:
-            # 400 = client error, "you sent something invalid"
-            raise HTTPException(status_code=400, detail="Email already registered")
-
-        new_patient = Patient(
-            name=request.name,
-            phone=request.phone,
-            email=request.email,
-            password_hash=hash_password(request.password),
-        )
-        session.add(new_patient)
-        session.commit()
-        session.refresh(new_patient)  # loads the auto-generated id back into new_patient
-
-        return new_patient
-
-
-@app.post("/login/patient", response_model=TokenResponse)
-def login_patient(request: LoginRequest):
-    """
-    Logs a patient in.
-    Steps:
-      1. Look up the patient by email.
-      2. Verify their password against the stored hash.
-      3. If valid, issue a JWT token they'll use for future requests.
-    """
-    with Session(engine) as session:
-        patient = session.exec(
-            select(Patient).where(Patient.email == request.email)
-        ).first()
-
-        # Deliberately vague error message — we don't tell the client WHICH
-        # part was wrong (email not found vs wrong password). This is a
-        # security best practice: it stops attackers from figuring out
-        # which emails are registered by testing login attempts.
-        if not patient or not verify_password(request.password, patient.password_hash):
-            raise HTTPException(status_code=401, detail="Invalid email or password")
-
-        token = create_access_token(data={"sub": str(patient.id), "role": "patient"})
-        return TokenResponse(access_token=token)
 # ---------------------------------------------------------------------
 # DEPARTMENTS & DOCTORS
 # ---------------------------------------------------------------------
@@ -331,80 +273,7 @@ def get_my_appointments(current_user: dict = Depends(get_current_user)):
         ).all()
         return appointments
     
-# ---------------------------------------------------------------------
-# QUEUE STATUS
-# ---------------------------------------------------------------------
 
-@app.get("/appointments/{appointment_id}/queue-status", response_model=QueueStatusResponse)
-def get_queue_status(
-    appointment_id: int,
-    current_user: dict = Depends(get_current_user),
-):
-    """
-    Returns how many patients are currently ahead of this specific
-    appointment, for the SAME doctor, that are still 'pending'
-    (i.e. haven't been seen yet).
-
-    This is the live number the patient app polls to show
-    "3 patients ahead of you" — and it's also what Phase 3's ML model
-    will use as its main predictive feature (queue_length_ahead had
-    the highest importance in our paper's results, ~0.52).
-    """
-    patient_id = int(current_user["sub"])
-
-    with Session(engine) as session:
-        appointment = session.get(Appointment, appointment_id)
-
-        if not appointment:
-            raise HTTPException(status_code=404, detail="Appointment not found")
-
-        # Security check: a patient can only view their OWN queue status,
-        # not anyone else's, even if they guess a valid appointment_id.
-        if appointment.patient_id != patient_id:
-            raise HTTPException(status_code=403, detail="Not your appointment")
-
-        # Count pending appointments for the same doctor ahead of this one
-        appt_pos = appointment.queue_position if appointment.queue_position is not None else 999
-        patients_ahead = len(
-            session.exec(
-                select(Appointment).where(
-                    Appointment.doctor_id == appointment.doctor_id,
-                    Appointment.status == "pending",
-                    Appointment.queue_position < appt_pos,
-                )
-            ).all()
-        )
-
-        return QueueStatusResponse(
-            appointment_id=appointment.id,
-            doctor_id=appointment.doctor_id,
-            queue_position=appointment.queue_position,
-            patients_ahead=patients_ahead,
-        )
-        
-# ---------------------------------------------------------------------
-# ML WAIT-TIME PREDICTION
-# ---------------------------------------------------------------------
-
-@app.post("/predict-wait", response_model=PredictWaitResponse)
-def get_wait_prediction(request: PredictWaitRequest):
-    """
-    Returns a predicted wait-time range + explanation using our trained
-    Random Forest model. This is a standalone test endpoint for Phase 3 —
-    later this logic will be triggered automatically when a patient
-    checks their queue status, using real live data instead of
-    manually-supplied values.
-    """
-    result = predict_wait(
-        doctor_id=request.doctor_id,
-        department=request.department,
-        doctor_avg_consult_minutes=request.doctor_avg_consult_minutes,
-        day_of_week=request.day_of_week,
-        hour_of_day=request.hour_of_day,
-        queue_length_ahead=request.queue_length_ahead,
-        patient_type=request.patient_type,
-    )
-    return result
 
 # ---------------------------------------------------------------------
 # DEPARTURE-TIME NOTIFICATION LOGIC
@@ -852,84 +721,7 @@ def get_frontend_queue_status(token_identifier: str):
         )
 
 
-@app.post("/calculate-departure", response_model=DepartureCheckResponse)
-def calculate_departure_alias(
-    request: CalculateDepartureRequest,
-    current_user: dict = Depends(get_current_user),
-):
-    """
-    Alias endpoint for Naveen's patient-app location.js / api.js contract.
-    """
-    lat = request.patient_lat if request.patient_lat is not None else request.patient_latitude
-    lng = request.patient_lng if request.patient_lng is not None else request.patient_longitude
-    if lat is None or lng is None:
-        raise HTTPException(status_code=400, detail="Patient coordinates are required")
 
-    check_req = DepartureCheckRequest(
-        appointment_id=request.appointment_id,
-        patient_lat=lat,
-        patient_lng=lng,
-    )
-    return check_departure_time(check_req, current_user=current_user)
-
-
-@app.get("/ai/predict-arrival", response_model=PredictArrivalResponse)
-def predict_arrival_frontend(
-    appointment_id: Optional[int] = None,
-    patient_lat: Optional[float] = None,
-    patient_lng: Optional[float] = None,
-    current_user: dict = Depends(get_current_user),
-):
-    """
-    Compatibility route for Laxuman's ArrivalPrediction.jsx page.
-    Combines Random Forest wait-time prediction and Haversine/Google travel time.
-    """
-    patient_id = int(current_user["sub"])
-    with Session(engine) as session:
-        if appointment_id:
-            appointment = session.get(Appointment, appointment_id)
-        else:
-            appointment = session.exec(
-                select(Appointment).where(
-                    Appointment.patient_id == patient_id,
-                    Appointment.status == "pending"
-                )
-            ).first()
-
-        if not appointment:
-            appointment = session.exec(select(Appointment)).first()
-
-        if not appointment:
-            raise HTTPException(status_code=404, detail="No appointment found to predict arrival")
-
-        lat = patient_lat if patient_lat is not None else (HOSPITAL_LAT + 0.04)
-        lng = patient_lng if patient_lng is not None else (HOSPITAL_LNG + 0.04)
-
-        dep_check = check_departure_time(
-            DepartureCheckRequest(
-                appointment_id=appointment.id,
-                patient_lat=lat,
-                patient_lng=lng,
-            ),
-            current_user={"sub": str(appointment.patient_id)},
-        )
-
-        leave_in = max(0.0, round(dep_check.predicted_wait_minutes - dep_check.travel_time_minutes, 1))
-        opt_dep = (datetime.utcnow() + timedelta(minutes=float(leave_in))).strftime("%I:%M %p")
-        est_arr = (datetime.utcnow() + timedelta(minutes=float(leave_in) + dep_check.travel_time_minutes)).strftime("%I:%M %p")
-
-        return PredictArrivalResponse(
-            recommendedLeaveInMinutes=float(leave_in),
-            trafficDelayMinutes=dep_check.travel_time_minutes,
-            queueWaitMinutes=dep_check.predicted_wait_minutes,
-            distanceKm=round(dep_check.travel_time_minutes * 0.41, 1),
-            trafficCondition="Moderate Traffic (Live Route)",
-            weather="28°C Clear Sky (Tumakuru)",
-            optimalDepartureTime=opt_dep,
-            estimatedArrivalTime=est_arr,
-            should_leave_now=dep_check.should_leave_now,
-            message=dep_check.message,
-        )
 
 
 @app.get("/notifications", response_model=List[NotificationItem])

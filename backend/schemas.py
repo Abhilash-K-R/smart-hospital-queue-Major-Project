@@ -20,43 +20,7 @@ from typing import Optional, List, Union, Dict, Any
 from pydantic import BaseModel, EmailStr
 
 
-# ---------------------------------------------------------------------
-# SIGNUP
-# ---------------------------------------------------------------------
 
-class PatientSignupRequest(BaseModel):
-    """What the client must send us to create a new patient account."""
-    name: str
-    phone: str
-    email: EmailStr  # Pydantic automatically validates this looks like a real email
-    password: str    # plain password, ONLY exists in memory briefly before we hash it
-
-
-class PatientResponse(BaseModel):
-    """
-    What we send BACK after signup/login. Notice: no password_hash field.
-    This is the whole point of having a separate response schema.
-    """
-    id: int
-    name: str
-    phone: str
-    email: str
-
-
-# ---------------------------------------------------------------------
-# LOGIN
-# ---------------------------------------------------------------------
-
-class LoginRequest(BaseModel):
-    """What the client sends us to log in."""
-    email: EmailStr
-    password: str
-
-
-class TokenResponse(BaseModel):
-    """What we send back after a successful login — the JWT access pass."""
-    access_token: str
-    token_type: str = "bearer"  # standard JWT convention, tells the client how to use the token
     
     
 # ---------------------------------------------------------------------
@@ -144,42 +108,7 @@ class AppointmentResponse(BaseModel):
     estimatedWaitMinutes: Optional[float] = 0.0
 
     
-# ---------------------------------------------------------------------
-# QUEUE STATUS
-# ---------------------------------------------------------------------
 
-class QueueStatusResponse(BaseModel):
-    """What we send back when a patient checks their live queue position."""
-    appointment_id: int
-    doctor_id: int
-    queue_position: int
-    patients_ahead: int
-    
-# ---------------------------------------------------------------------
-# WAIT-TIME PREDICTION (ML)
-# ---------------------------------------------------------------------
-
-class PredictWaitRequest(BaseModel):
-    """
-    What's needed to predict a wait time. In Phase 3 we're testing this
-    standalone; later (Phase 4+) most of these values will be looked up
-    automatically from the doctor/appointment records instead of the
-    client having to supply them manually.
-    """
-    doctor_id: str
-    department: str
-    doctor_avg_consult_minutes: int
-    day_of_week: str
-    hour_of_day: int
-    queue_length_ahead: int
-    patient_type: str
-
-
-class PredictWaitResponse(BaseModel):
-    predicted_minutes: float
-    range_low: float
-    range_high: float
-    explanation: str
     
 # ---------------------------------------------------------------------
 # DEPARTURE-TIME NOTIFICATION
@@ -281,26 +210,7 @@ class FrontendQueueStatusResponse(BaseModel):
     lastUpdated: str
 
 
-class CalculateDepartureRequest(BaseModel):
-    appointment_id: int
-    patient_lat: float | None = None
-    patient_lng: float | None = None
-    patient_latitude: float | None = None
-    patient_longitude: float | None = None
-    buffer_minutes: int | None = 0
 
-
-class PredictArrivalResponse(BaseModel):
-    recommendedLeaveInMinutes: float
-    trafficDelayMinutes: int
-    queueWaitMinutes: float
-    distanceKm: float
-    trafficCondition: str
-    weather: str
-    optimalDepartureTime: str
-    estimatedArrivalTime: str
-    should_leave_now: bool
-    message: str
 
 
 class NotificationItem(BaseModel):

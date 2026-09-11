@@ -127,33 +127,32 @@ def run_tests():
             print(f"  -> PASSED: Access blocked with status 403 ('{e.detail}').")
 
     # =====================================================================
-    # FRONTEND BRIDGE ROUTE VERIFICATION (Option B)
+    # =====================================================================
+    # FRONTEND CANONICAL ROUTE VERIFICATION
     # =====================================================================
     from main import (
         frontend_login, frontend_register, get_patient_profile,
-        get_frontend_queue_status, calculate_departure_alias,
-        predict_arrival_frontend, get_notifications
+        get_frontend_queue_status, get_notifications
     )
     from schemas import (
-        FrontendLoginRequest, FrontendRegisterRequest,
-        CalculateDepartureRequest
+        FrontendLoginRequest, FrontendRegisterRequest
     )
 
     print("\n" + "=" * 60)
-    print("STARTING FRONTEND BRIDGE COMPATIBILITY TESTS (Option B)")
+    print("STARTING FRONTEND CANONICAL ROUTE TESTS")
     print("=" * 60)
 
     # 1. Test POST /auth/login
-    print("\n[Bridge 1/6] Testing POST /auth/login (patientService.login)...")
+    print("\n[Canonical 1/5] Testing POST /auth/login (patientService.login)...")
     login_bridge = frontend_login(FrontendLoginRequest(emailOrPhone=test_email, password=test_password))
     assert login_bridge.success is True
     assert login_bridge.token is not None
     assert login_bridge.user["email"] == test_email
-    print(f"  -> PASSED: Successfully logged in via bridge: {login_bridge.user['name']}")
+    print(f"  -> PASSED: Successfully logged in via canonical /auth/login: {login_bridge.user['name']}")
 
     # 2. Test POST /patients/register
     reg_email = f"quick_reg_{uuid.uuid4().hex[:5]}@test.com"
-    print(f"\n[Bridge 2/6] Testing POST /patients/register (instant registration)...")
+    print(f"\n[Canonical 2/5] Testing POST /patients/register (instant registration)...")
     reg_bridge = frontend_register(FrontendRegisterRequest(
         fullName="Quick Patient",
         phone="9876599999",
@@ -166,52 +165,27 @@ def run_tests():
     print(f"  -> PASSED: Auto-registered and issued token: {reg_bridge['tokenNumber']}")
 
     # 3. Test GET /patients/profile
-    print("\n[Bridge 3/6] Testing GET /patients/profile...")
+    print("\n[Canonical 3/5] Testing GET /patients/profile...")
     profile = get_patient_profile(current_user=current_user)
     assert profile["email"] == test_email
     print(f"  -> PASSED: Profile retrieved: {profile['name']} ({profile['phone']})")
 
     # 4. Test GET /queue/status/OPD-004
-    print("\n[Bridge 4/6] Testing GET /queue/status/OPD-004 (QueueCard & ProgressCard)...")
+    print("\n[Canonical 4/5] Testing GET /queue/status/OPD-004 (QueueCard & ProgressCard)...")
     q_status = get_frontend_queue_status(f"OPD-{appointment.id:03d}")
     assert q_status.numericToken == appointment.queue_position
     assert q_status.doctor is not None
     assert q_status.department is not None
     print(f"  -> PASSED: Live card status: Token {q_status.tokenNumber}, Serving {q_status.currentToken}, Wait {q_status.estimatedWaitMinutes}m")
 
-    # 5. Test POST /calculate-departure (Naveen location.js format)
-    print("\n[Bridge 5/6] Testing POST /calculate-departure (Naveen GPS format)...")
-    nav_calc = calculate_departure_alias(
-        CalculateDepartureRequest(
-            appointment_id=appointment.id,
-            patient_latitude=far_lat,
-            patient_longitude=far_lng,
-        ),
-        current_user=current_user,
-    )
-    assert nav_calc.should_leave_now is True
-    print(f"  -> PASSED: Naveen calculateDeparture correctly returned: should_leave={nav_calc.should_leave_now}")
-
-    # 6. Test GET /ai/predict-arrival (Laxuman ArrivalPrediction.jsx format)
-    print("\n[Bridge 6/6] Testing GET /ai/predict-arrival (Laxuman ArrivalPrediction)...")
-    lax_arrival = predict_arrival_frontend(
-        appointment_id=appointment.id,
-        patient_lat=nearby_lat,
-        patient_lng=nearby_lng,
-        current_user=current_user,
-    )
-    assert lax_arrival.optimalDepartureTime is not None
-    assert lax_arrival.trafficDelayMinutes > 0
-    print(f"  -> PASSED: Arrival prediction generated: Leave in {lax_arrival.recommendedLeaveInMinutes}m, ETA {lax_arrival.estimatedArrivalTime}")
-
-    # 7. Test Notifications Feed
-    print("\n[Bridge 7/6] Testing GET /notifications feed...")
+    # 5. Test Notifications Feed
+    print("\n[Canonical 5/5] Testing GET /notifications feed...")
     notifs = get_notifications(current_user=current_user)
     assert len(notifs) >= 2
     print(f"  -> PASSED: {len(notifs)} notifications available in feed.")
 
     print("\n" + "=" * 60)
-    print("ALL TESTS PASSED! Both Phase 4 Core and Frontend Bridge are 100% verified.")
+    print("ALL TESTS PASSED! Both Core and Canonical Routes are 100% verified.")
     print("=" * 60)
 
 

@@ -65,8 +65,8 @@ def main():
     patient_id = reg_data["patient"]["id"]
     appt_id = reg_data["patient"]["appointment_id"]
     token_num = reg_data["patient"]["tokenNumber"]
-    initial_pos = reg_data["patient"]["numericToken"]
-    print(f"  Created Patient ID: {patient_id}, Appointment ID: {appt_id}, Token: {token_num}, Position: {initial_pos}")
+    initial_ahead = reg_data["patient"]["patientsAhead"]
+    print(f"  Created Patient ID: {patient_id}, Appointment ID: {appt_id}, Token: {token_num}, Patients Ahead: {initial_ahead}")
 
     auth_headers = {"Authorization": f"Bearer {token}"}
 
@@ -111,14 +111,13 @@ def main():
     print(f"  Emergency Appt ID: {emg_appt_id}, Token: {emg_token}, Position: {emg_data['queue_position']}")
     assert_true(emg_data["queue_position"] == 1, "Emergency patient placed at Position 1")
 
-    # Verify regular patient's queue position was bumped
-    log("2.1 Verify Dynamic Queue Bumping on Regular Patient", f"GET /appointments/{appt_id}/queue-status")
-    q_res = requests.get(f"{BASE_URL}/appointments/{appt_id}/queue-status", headers=auth_headers)
+    log("2.1 Verify Dynamic Queue Bumping on Regular Patient", f"GET /queue/status/{token_num}")
+    q_res = requests.get(f"{BASE_URL}/queue/status/{token_num}", headers=auth_headers)
     assert_true(q_res.status_code == 200, "Queue status fetched successfully")
     q_data = q_res.json()
-    new_pos = q_data["queue_position"]
-    print(f"  Regular Patient Position: was {initial_pos} -> now bumped to {new_pos}")
-    assert_true(new_pos == initial_pos + 1, f"Queue position increased by +1 ({initial_pos} -> {new_pos})")
+    new_ahead = q_data["patientsAhead"]
+    print(f"  Regular Patient Patients Ahead: was {initial_ahead} -> now bumped to {new_ahead}")
+    assert_true(new_ahead == initial_ahead + 1, f"Patients ahead increased by +1 ({initial_ahead} -> {new_ahead})")
 
     # Verify regular patient's departure check wait time increased
     log("2.2 Verify ML Wait-Time Recalculation after Emergency", "POST /departure-check")

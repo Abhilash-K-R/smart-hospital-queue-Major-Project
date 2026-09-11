@@ -18,23 +18,23 @@ password = "LivePassword123"
 
 # Register (if not exists)
 signup_res = requests.post(
-    f"{BASE}/signup/patient",
-    json={"name": "Abhi Live Verification", "phone": "9876543210", "email": email, "password": password}
+    f"{BASE}/patients/register",
+    json={"fullName": "Abhi Live Verification", "phone": "9876543210", "email": email, "password": password}
 )
 if signup_res.status_code == 200:
-    print(f"Patient created: ID {signup_res.json()['id']}")
+    print(f"Patient created / retrieved via canonical /patients/register")
 else:
     print("Patient already registered, proceeding to login.")
 
-# Login
+# Login via canonical /auth/login
 login_res = requests.post(
-    f"{BASE}/login/patient",
+    f"{BASE}/auth/login",
     json={"email": email, "password": password}
 )
 assert login_res.status_code == 200, f"Login failed: {login_res.text}"
-token = login_res.json()["access_token"]
+token = login_res.json()["token"]
 headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
-print("POST /login/patient -> 200 OK")
+print("POST /auth/login -> 200 OK")
 print(f"JWT Access Token: {token[:25]}...{token[-15:]}")
 
 print("\n" + "=" * 65)
