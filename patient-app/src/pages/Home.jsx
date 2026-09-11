@@ -28,10 +28,7 @@ export const Home = () => {
 
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 space-y-20">
 
-        {/* 2. EMERGENCY ALERT BANNER */}
-        <EmergencyAlert count={1} onTriggerSimulation={triggerEmergency} />
-
-        {/* 3. HOSPITAL LIVE METRICS & STATISTICS */}
+        {/* 2. HOSPITAL LIVE METRICS & STATISTICS */}
         <section className="space-y-6">
           <div className="text-center space-y-2">
             <span className="text-xs font-bold text-blue-600 dark:text-blue-400 uppercase tracking-widest">Real-time Performance</span>

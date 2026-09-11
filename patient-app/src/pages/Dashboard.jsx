@@ -15,7 +15,7 @@ import { Clock, Navigation, Calendar, FileText, Siren, ShieldCheck, BrainCircuit
 export const Dashboard = () => {
   const navigate = useNavigate();
   const { user } = useAuth();
-  const { queueState, triggerEmergency } = useQueue();
+  const { queueState } = useQueue();
 
   return (
     <div className="space-y-8">
@@ -23,8 +23,10 @@ export const Dashboard = () => {
       {/* Top Header */}
       <TopBar title={`Welcome back, ${user?.name || 'Laxuman G'}!`} subtitle="Your active OPD consultation queue status and AI departure tracker" />
 
-      {/* Emergency Alert Banner */}
-      <EmergencyAlert count={queueState.emergencyCount} onTriggerSimulation={triggerEmergency} />
+      {/* Emergency Alert Banner (Shown dynamically when staff declares an emergency) */}
+      {queueState.emergencyCount > 0 && (
+        <EmergencyAlert count={queueState.emergencyCount} />
+      )}
 
       {/* Main Grid Section */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
