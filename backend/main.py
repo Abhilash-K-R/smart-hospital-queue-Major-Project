@@ -40,7 +40,9 @@ from schemas import (
     QueueAdvanceRequest, DoctorStatusUpdateRequest, StaffStatsResponse,
     SymptomAnalyzeRequest, SymptomAnalyzeResponse, SymptomAnalyzeResult,
     QueueLogItem, QueueLogResponse,
+    AppointmentBookRequest, AppointmentBookResponse,
 )
+
 
 # Phase 7: Track doctor live operational status and active delay buffers (in minutes)
 # Format: {doctor_id: {"status": "Delayed" | "Active" | "On Break", "delay_minutes": int}}
@@ -135,6 +137,35 @@ def login_patient(request: LoginRequest):
 # DEPARTMENTS & DOCTORS
 # ---------------------------------------------------------------------
 
+DOCTOR_METADATA = {
+    "Dr. Rajeswari R.": {"room": "Room 204", "qualification": "MBBS, MD (General Medicine)", "experience": "14 Years Exp."},
+    "Dr. Arjun Rao": {"room": "Room 205", "qualification": "MBBS, DNB (Family Medicine)", "experience": "9 Years Exp."},
+    "Dr. Priya Sharma": {"room": "Room 302", "qualification": "MBBS, MD, DM (Cardiology)", "experience": "16 Years Exp."},
+    "Dr. Vikram K. Rao": {"room": "Room 108", "qualification": "MBBS, MS (Orthopedics)", "experience": "12 Years Exp."},
+    "Dr. Ananya Hegde": {"room": "Room 105", "qualification": "MBBS, MD (Pediatrics)", "experience": "10 Years Exp."},
+    "Dr. Rajeshwar B.": {"room": "Room 401", "qualification": "MBBS, MD, DM (Neurology)", "experience": "18 Years Exp."},
+    "Dr. Sneha Patil": {"room": "Room 210", "qualification": "MBBS, MD (Dermatology)", "experience": "8 Years Exp."},
+    "Dr. Manoj Kumar": {"room": "Room 305", "qualification": "MBBS, DTCD, DNB (Pulmonology)", "experience": "11 Years Exp."},
+}
+
+
+def resolve_doctor_from_request(session: Session, doctor_id: Optional[int] = None, doctor_name: Optional[str] = None, department_name: Optional[str] = None) -> Optional[Doctor]:
+    """Helper to cleanly resolve doctor from ID, name substring, or department name."""
+    doctor = None
+    if doctor_id:
+        doctor = session.get(Doctor, doctor_id)
+    if not doctor and doctor_name:
+        clean = doctor_name.split("(")[0].strip()
+        doctor = session.exec(select(Doctor).where(Doctor.name.ilike(f"%{clean}%"))).first()
+    if not doctor and department_name:
+        dept = session.exec(select(Department).where(Department.name.ilike(f"%{department_name.strip()}%"))).first()
+        if dept:
+            doctor = session.exec(select(Doctor).where(Doctor.department_id == dept.id)).first()
+    if not doctor:
+        doctor = session.exec(select(Doctor)).first()
+    return doctor
+
+
 @app.get("/departments", response_model=List[DepartmentResponse])
 def list_departments():
     """
@@ -150,19 +181,36 @@ def list_departments():
 @app.get("/doctors", response_model=List[DoctorResponse])
 def list_doctors(department_id: int = None):
     """
-    Returns doctors, optionally filtered by department.
-    Example: GET /doctors?department_id=1 → only doctors in department 1.
-    Called without a query param, GET /doctors → returns ALL doctors.
-
-    This filtering is how the patient app shows "all doctors under the
-    matched department" after a patient picks a symptom.
+    Returns doctors, optionally filtered by department, enriched with room & qualification metadata.
     """
     with Session(engine) as session:
         query = select(Doctor)
         if department_id is not None:
             query = query.where(Doctor.department_id == department_id)
         doctors = session.exec(query).all()
-        return doctors
+        departments = {dept.id: dept.name for dept in session.exec(select(Department)).all()}
+        
+        result = []
+        for doc in doctors:
+            meta = DOCTOR_METADATA.get(doc.name, {})
+            dept_name = departments.get(doc.department_id, "General Medicine")
+            doc_state = doctor_delays.get(doc.id, {"status": "Active", "delay_minutes": 0})
+            result.append(
+                DoctorResponse(
+                    id=doc.id,
+                    name=doc.name,
+                    department_id=doc.department_id,
+                    avg_consult_minutes=doc.avg_consult_minutes,
+                    department=dept_name,
+                    roomNo=meta.get("room", "Room 204"),
+                    qualification=meta.get("qualification", "MBBS, MD"),
+                    experience=meta.get("experience", "10 Years Exp."),
+                    status=doc_state.get("status", "Active"),
+                    delay_minutes=doc_state.get("delay_minutes", 0),
+                )
+            )
+        return result
+
 # ---------------------------------------------------------------------
 # SYMPTOM MAPPING
 # ---------------------------------------------------------------------
@@ -216,24 +264,19 @@ def create_appointment(
 ):
     """
     Books a new appointment for the LOGGED-IN patient.
-    current_user["sub"] holds the patient's id, extracted from their JWT
-    token — this is what stops a patient from booking on someone else's
-    behalf by just changing a number in the request.
+    current_user["sub"] holds the patient's id, extracted from their JWT token.
     """
     patient_id = int(current_user["sub"])
 
     with Session(engine) as session:
-        # Confirm the doctor actually exists before booking against them
-        doctor = session.get(Doctor, request.doctor_id)
+        doctor = resolve_doctor_from_request(session, request.doctor_id, request.doctor, request.department)
         if not doctor:
             raise HTTPException(status_code=404, detail="Doctor not found")
 
-        # Count how many patients are already waiting for this doctor,
-        # so we know this patient's position in line.
         existing_count = len(
             session.exec(
                 select(Appointment).where(
-                    Appointment.doctor_id == request.doctor_id,
+                    Appointment.doctor_id == doctor.id,
                     Appointment.status == "pending",
                 )
             ).all()
@@ -241,7 +284,7 @@ def create_appointment(
 
         new_appointment = Appointment(
             patient_id=patient_id,
-            doctor_id=request.doctor_id,
+            doctor_id=doctor.id,
             booked_time=datetime.utcnow(),
             status="pending",
             queue_position=existing_count + 1,
@@ -250,7 +293,26 @@ def create_appointment(
         session.commit()
         session.refresh(new_appointment)
 
-        return new_appointment
+        dept = session.get(Department, doctor.department_id)
+        dept_name = dept.name if dept else "General Medicine"
+        meta = DOCTOR_METADATA.get(doctor.name, {})
+        est_wait = round(existing_count * doctor.avg_consult_minutes * 0.85, 1)
+
+        return AppointmentResponse(
+            id=new_appointment.id,
+            patient_id=new_appointment.patient_id,
+            doctor_id=doctor.id,
+            booked_time=new_appointment.booked_time,
+            status=new_appointment.status,
+            queue_position=new_appointment.queue_position,
+            tokenNumber=f"OPD-{new_appointment.id:03d}",
+            doctor=doctor.name,
+            department=dept_name,
+            roomNo=meta.get("room", "Room 204"),
+            patientsAhead=existing_count,
+            estimatedWaitMinutes=est_wait,
+        )
+
 
 
 @app.get("/appointments/my", response_model=List[AppointmentResponse])
@@ -517,7 +579,9 @@ def frontend_register(request: FrontendRegisterRequest):
             session.commit()
             session.refresh(patient)
 
-        doctor = session.exec(select(Doctor)).first()
+        doctor = resolve_doctor_from_request(session, request.doctor_id, request.doctor, request.department)
+        if not doctor:
+            doctor = session.exec(select(Doctor)).first()
         doc_id = doctor.id if doctor else 1
 
         existing_count = len(
@@ -540,14 +604,20 @@ def frontend_register(request: FrontendRegisterRequest):
         session.commit()
         session.refresh(appointment)
 
-        token_num = appointment.queue_position or 1
+        dept = session.get(Department, doctor.department_id) if doctor else None
+        dept_name = dept.name if dept else "General Medicine"
+        meta = DOCTOR_METADATA.get(doctor.name, {}) if doctor else {}
+
+        token_num = appointment.id
+        token_str = f"OPD-{token_num:03d}"
         access_token = create_access_token(data={"sub": str(patient.id)})
+        est_wait = round(existing_count * (doctor.avg_consult_minutes if doctor else 15) * 0.85, 1)
 
         return {
             "success": True,
             "message": "Registration & Appointment Booking Successful!",
             "token": access_token,
-            "tokenNumber": f"OPD-{token_num:03d}",
+            "tokenNumber": token_str,
             "numericToken": token_num,
             "patient": {
                 "id": patient.id,
@@ -555,13 +625,136 @@ def frontend_register(request: FrontendRegisterRequest):
                 "phone": patient.phone,
                 "email": patient.email,
                 "appointment_id": appointment.id,
-                "tokenNumber": f"OPD-{token_num:03d}",
+                "tokenNumber": token_str,
                 "numericToken": token_num,
                 "currentToken": f"OPD-{max(1, token_num - existing_count):03d}",
                 "patientsAhead": existing_count,
-                "estimatedWaitMinutes": round(existing_count * (doctor.avg_consult_minutes if doctor else 15) * 0.85, 1),
+                "estimatedWaitMinutes": est_wait,
+                "doctor": doctor.name if doctor else "Dr. Rajeswari R.",
+                "doctorId": f"doc-{doctor.id}" if doctor else "doc-1",
+                "department": dept_name,
+                "roomNo": meta.get("room", "Room 204"),
+                "appointmentTime": request.appointmentTime or "10:30 AM",
+                "appointmentDate": request.appointmentDate or datetime.utcnow().strftime("%Y-%m-%d"),
+                "symptoms": request.symptoms or "Routine consultation",
             },
         }
+
+
+@app.post("/patients/book", response_model=AppointmentBookResponse)
+def book_patient_appointment(
+    req: AppointmentBookRequest,
+    request: Request,
+):
+    """
+    Seamless appointment booking endpoint for patient-app Appointment.jsx.
+    Extracts authenticated user from token if available, or falls back to
+    provided details or demo patient Laxuman G.
+    Writes directly to Neon PostgreSQL appointment table so it immediately
+    appears in staff-dashboard live queue.
+    """
+    with Session(engine) as session:
+        # Determine Patient
+        patient = None
+        auth_header = request.headers.get("Authorization")
+        if auth_header and auth_header.startswith("Bearer "):
+            raw_token = auth_header.split(" ")[1]
+            try:
+                from auth import decode_access_token
+                payload = decode_access_token(raw_token)
+                if payload and "sub" in payload:
+                    patient = session.get(Patient, int(payload["sub"]))
+            except Exception:
+                pass
+
+        if not patient and req.email:
+            patient = session.exec(select(Patient).where(Patient.email == req.email)).first()
+
+        if not patient:
+            # Look for default patient or create Laxuman G
+            patient = session.exec(select(Patient).where(Patient.email == "laxuman.patient@mediflow.ai")).first()
+            if not patient:
+                patient = Patient(
+                    name=req.patient_name or "Laxuman G",
+                    phone=req.phone or "9876543210",
+                    email="laxuman.patient@mediflow.ai",
+                    password_hash=hash_password("Patient@123"),
+                )
+                session.add(patient)
+                session.commit()
+                session.refresh(patient)
+
+        # Resolve Doctor
+        doctor = resolve_doctor_from_request(session, req.doctor_id, req.doctor, req.department)
+        if not doctor:
+            doctor = session.exec(select(Doctor)).first()
+            if not doctor:
+                raise HTTPException(status_code=404, detail="No doctors available in hospital database")
+
+        dept = session.get(Department, doctor.department_id)
+        dept_name = dept.name if dept else "General Medicine"
+        meta = DOCTOR_METADATA.get(doctor.name, {})
+
+        existing_count = len(
+            session.exec(
+                select(Appointment).where(
+                    Appointment.doctor_id == doctor.id,
+                    Appointment.status == "pending",
+                )
+            ).all()
+        )
+
+        appointment = Appointment(
+            patient_id=patient.id,
+            doctor_id=doctor.id,
+            booked_time=datetime.utcnow(),
+            status="pending",
+            queue_position=existing_count + 1,
+        )
+        session.add(appointment)
+        session.commit()
+        session.refresh(appointment)
+
+        token_num = appointment.id
+        token_str = f"OPD-{token_num:03d}"
+        est_wait = round(existing_count * doctor.avg_consult_minutes * 0.85, 1)
+
+        patient_payload = {
+            "id": f"P-{patient.id:05d}",
+            "name": patient.name,
+            "phone": patient.phone,
+            "email": patient.email,
+            "appointment_id": appointment.id,
+            "tokenNumber": token_str,
+            "numericToken": token_num,
+            "currentToken": f"OPD-{max(1, token_num - existing_count):03d}",
+            "patientsAhead": existing_count,
+            "estimatedWaitMinutes": est_wait,
+            "doctor": doctor.name,
+            "doctorId": f"doc-{doctor.id}",
+            "department": dept_name,
+            "roomNo": meta.get("room", "Room 204"),
+            "appointmentTime": req.timeSlot or req.time_slot or "10:30 AM",
+            "appointmentDate": req.date or datetime.utcnow().strftime("%Y-%m-%d"),
+            "symptoms": req.symptoms or "Routine consultation",
+        }
+
+        return AppointmentBookResponse(
+            success=True,
+            message="Appointment successfully booked and token issued!",
+            appointment_id=appointment.id,
+            tokenNumber=token_str,
+            numericToken=token_num,
+            currentToken=f"OPD-{max(1, token_num - existing_count):03d}",
+            patientsAhead=existing_count,
+            estimatedWaitMinutes=est_wait,
+            doctor=doctor.name,
+            department=dept_name,
+            roomNo=meta.get("room", "Room 204"),
+            booked_time=datetime.utcnow().strftime("%I:%M %p"),
+            patient=patient_payload,
+        )
+
 
 
 @app.get("/patients/profile")
@@ -925,8 +1118,9 @@ def get_staff_queue():
                 pred_wait = calculate_predicted_wait(doc, dept_name, pos, "emergency" if is_emergency else "normal")
                 wait_str = f"{int(pred_wait)}m"
 
-            token_num = f"EMG-{appt.id:02d}" if is_emergency else f"T-{appt.id:03d}"
+            token_num = f"EMG-{appt.id:02d}" if is_emergency else f"OPD-{appt.id:03d}"
             booked_str = appt.booked_time.strftime("%I:%M %p") if appt.booked_time else "Now"
+
 
 
             queue_items.append(
@@ -1256,6 +1450,7 @@ def get_staff_doctors():
                 select(Appointment).where(Appointment.doctor_id == d.id, Appointment.status == "pending")
             ).all()
             doc_state = doctor_delays.get(d.id, {"status": "Active", "delay_minutes": 0})
+            meta = DOCTOR_METADATA.get(d.name, {})
             result.append({
                 "id": d.id,
                 "name": d.name,
@@ -1264,8 +1459,12 @@ def get_staff_doctors():
                 "status": doc_state.get("status", "Active"),
                 "delay_minutes": doc_state.get("delay_minutes", 0),
                 "queue_length": len(waiting),
+                "roomNo": meta.get("room", "Room 204"),
+                "qualification": meta.get("qualification", "MBBS, MD"),
+                "experience": meta.get("experience", "10 Years Exp."),
             })
         return result
+
 
 
 @app.put("/staff/doctors/{doctor_id}/status")

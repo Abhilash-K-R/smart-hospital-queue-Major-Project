@@ -19,7 +19,7 @@ export const Register = () => {
   const [tokenResult, setTokenResult] = useState(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const { register, handleSubmit, watch, formState: { errors } } = useForm({
+  const { register, handleSubmit, watch, setValue, formState: { errors } } = useForm({
     resolver: zodResolver(registerSchema),
     defaultValues: {
       fullName: "Laxuman G",
@@ -29,7 +29,7 @@ export const Register = () => {
       email: "laxuman.patient@mediflow.ai",
       bloodGroup: "O+",
       department: "General Medicine",
-      doctor: "Dr. Rajeswari N.",
+      doctor: "Dr. Rajeswari R.",
       symptoms: "Persistent fever and seasonal chills",
       appointmentDate: new Date().toISOString().split('T')[0],
       appointmentTime: "10:30",
@@ -39,14 +39,29 @@ export const Register = () => {
   });
 
   const selectedDepartment = watch('department');
+  const selectedDoctorName = watch('doctor');
 
   const filteredDoctors = DOCTORS.filter(d => 
     selectedDepartment ? d.department === selectedDepartment : true
   );
 
+  React.useEffect(() => {
+    if (filteredDoctors.length > 0) {
+      const exists = filteredDoctors.some(d => d.name === selectedDoctorName);
+      if (!exists) {
+        setValue('doctor', filteredDoctors[0].name);
+      }
+    }
+  }, [selectedDepartment, filteredDoctors, selectedDoctorName, setValue]);
+
   const onSubmit = async (data) => {
     setIsSubmitting(true);
-    const res = await patientService.registerPatient(data);
+    const docObj = DOCTORS.find(d => d.name === data.doctor) || filteredDoctors[0];
+    const payload = {
+      ...data,
+      doctor_id: docObj?.doctorId || 3
+    };
+    const res = await patientService.registerPatient(payload);
     setIsSubmitting(false);
 
     if (res.success) {

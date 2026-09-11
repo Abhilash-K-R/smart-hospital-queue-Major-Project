@@ -67,7 +67,12 @@ const Queue = () => {
     }
   };
 
+  const [doctorFilter, setDoctorFilter] = useState('ALL');
+  const [departmentFilter, setDepartmentFilter] = useState('ALL');
+
   const filteredQueue = queue.filter(item => {
+    if (doctorFilter !== 'ALL' && item.doctor !== doctorFilter) return false;
+    if (departmentFilter !== 'ALL' && item.department !== departmentFilter) return false;
     if (!searchQuery.trim()) return true;
     const q = searchQuery.toLowerCase();
     return (
@@ -77,6 +82,9 @@ const Queue = () => {
       (item.department && item.department.toLowerCase().includes(q))
     );
   });
+
+  const availableDoctors = Array.from(new Set(queue.map(item => item.doctor).filter(Boolean)));
+  const availableDepartments = Array.from(new Set(queue.map(item => item.department).filter(Boolean)));
 
   return (
     <div className="p-6 h-full flex flex-col">
@@ -92,6 +100,30 @@ const Queue = () => {
         </div>
         
         <div className="flex flex-wrap items-center gap-3">
+          {/* Department Filter */}
+          <select
+            value={departmentFilter}
+            onChange={(e) => setDepartmentFilter(e.target.value)}
+            className="px-3 py-2 border border-slate-200 rounded-lg text-sm bg-white text-slate-700 focus:outline-none focus:border-blue-500"
+          >
+            <option value="ALL">All Departments</option>
+            {availableDepartments.map(dept => (
+              <option key={dept} value={dept}>{dept}</option>
+            ))}
+          </select>
+
+          {/* Doctor Filter */}
+          <select
+            value={doctorFilter}
+            onChange={(e) => setDoctorFilter(e.target.value)}
+            className="px-3 py-2 border border-slate-200 rounded-lg text-sm bg-white text-slate-700 focus:outline-none focus:border-blue-500"
+          >
+            <option value="ALL">All Doctors</option>
+            {availableDoctors.map(doc => (
+              <option key={doc} value={doc}>{doc}</option>
+            ))}
+          </select>
+
           <button
             onClick={handleCallNext}
             disabled={isCallingNext || queue.length === 0}

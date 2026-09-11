@@ -16,6 +16,7 @@ objects whose only job is carrying data between the API and the outside world.
 Owner: Abhilash (Phase 2)
 """
 
+from typing import Optional, List, Union, Dict, Any
 from pydantic import BaseModel, EmailStr
 
 
@@ -78,6 +79,13 @@ class DoctorResponse(BaseModel):
     name: str
     department_id: int
     avg_consult_minutes: int
+    department: Optional[str] = None
+    roomNo: Optional[str] = None
+    qualification: Optional[str] = None
+    experience: Optional[str] = None
+    status: Optional[str] = "Active"
+    delay_minutes: Optional[int] = 0
+
     
 # ---------------------------------------------------------------------
 # SYMPTOM MAPPING
@@ -112,7 +120,12 @@ class AppointmentCreateRequest(BaseModel):
     Notice: NO patient_id here — we get that from the logged-in user's
     token instead, so a patient can only ever book for themselves.
     """
-    doctor_id: int
+    doctor_id: Optional[int] = None
+    doctor: Optional[str] = None
+    department: Optional[str] = None
+    date: Optional[str] = None
+    time_slot: Optional[str] = None
+    symptoms: Optional[str] = None
 
 
 class AppointmentResponse(BaseModel):
@@ -123,6 +136,13 @@ class AppointmentResponse(BaseModel):
     booked_time: datetime
     status: str
     queue_position: int | None
+    tokenNumber: Optional[str] = None
+    doctor: Optional[str] = None
+    department: Optional[str] = None
+    roomNo: Optional[str] = None
+    patientsAhead: Optional[int] = 0
+    estimatedWaitMinutes: Optional[float] = 0.0
+
     
 # ---------------------------------------------------------------------
 # QUEUE STATUS
@@ -211,9 +231,41 @@ class FrontendRegisterRequest(BaseModel):
     emergencyContact: str | None = None
     department: str | None = None
     doctor: str | None = None
+    doctor_id: int | None = None
     appointmentDate: str | None = None
     appointmentTime: str | None = None
     symptoms: str | None = None
+
+
+class AppointmentBookRequest(BaseModel):
+    doctor_id: Optional[int] = None
+    doctor: Optional[str] = None
+    department: Optional[str] = None
+    date: Optional[str] = None
+    time_slot: Optional[str] = None
+    timeSlot: Optional[str] = None
+    symptoms: Optional[str] = None
+    patient_name: Optional[str] = None
+    patient_id: Optional[str] = None
+    email: Optional[str] = None
+    phone: Optional[str] = None
+
+
+class AppointmentBookResponse(BaseModel):
+    success: bool = True
+    message: str
+    appointment_id: int
+    tokenNumber: str
+    numericToken: int
+    currentToken: str
+    patientsAhead: int
+    estimatedWaitMinutes: float
+    doctor: str
+    department: str
+    roomNo: str
+    booked_time: str
+    patient: dict
+
 
 
 class FrontendQueueStatusResponse(BaseModel):

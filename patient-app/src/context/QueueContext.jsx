@@ -1,26 +1,32 @@
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import { DEMO_PATIENT } from '../utils/constants';
 import { queueService } from '../services/queueService';
+import { useAuth } from './AuthContext';
 
 // Shares the live queue model and demo controls between queue-related screens.
 const QueueContext = createContext();
 
 // Provides queue state, automatic progression, and manual simulation actions.
 export const QueueProvider = ({ children }) => {
-  const [queueState, setQueueState] = useState({
-    tokenNumber: DEMO_PATIENT.tokenNumber,
-    numericToken: DEMO_PATIENT.numericToken,
-    currentToken: DEMO_PATIENT.currentToken,
-    patientsAhead: DEMO_PATIENT.patientsAhead,
-    estimatedWaitMinutes: DEMO_PATIENT.estimatedWaitMinutes,
-    doctor: DEMO_PATIENT.doctor,
-    department: DEMO_PATIENT.department,
-    roomNo: DEMO_PATIENT.roomNo,
-    emergencyCount: DEMO_PATIENT.emergencyInsertedCount,
-    lastUpdated: new Date().toLocaleTimeString(),
-    isAutoRefresh: true,
-    leaveAfterMinutes: DEMO_PATIENT.leaveAfterMinutes,
-    trafficDurationMinutes: DEMO_PATIENT.trafficDurationMinutes
+  const { user } = useAuth();
+
+  const [queueState, setQueueState] = useState(() => {
+    const active = user || DEMO_PATIENT;
+    return {
+      tokenNumber: active.tokenNumber || DEMO_PATIENT.tokenNumber,
+      numericToken: active.numericToken || DEMO_PATIENT.numericToken,
+      currentToken: active.currentToken || DEMO_PATIENT.currentToken,
+      patientsAhead: active.patientsAhead ?? DEMO_PATIENT.patientsAhead,
+      estimatedWaitMinutes: active.estimatedWaitMinutes ?? DEMO_PATIENT.estimatedWaitMinutes,
+      doctor: active.doctor || DEMO_PATIENT.doctor,
+      department: active.department || DEMO_PATIENT.department,
+      roomNo: active.roomNo || DEMO_PATIENT.roomNo,
+      emergencyCount: active.emergencyInsertedCount || 0,
+      lastUpdated: new Date().toLocaleTimeString(),
+      isAutoRefresh: true,
+      leaveAfterMinutes: active.leaveAfterMinutes || DEMO_PATIENT.leaveAfterMinutes,
+      trafficDurationMinutes: active.trafficDurationMinutes || DEMO_PATIENT.trafficDurationMinutes
+    };
   });
 
   // Fetches live queue status from FastAPI backend
@@ -48,10 +54,23 @@ export const QueueProvider = ({ children }) => {
     }
   }, [queueState.tokenNumber]);
 
-  // Initial load
+  // Sync state when user changes (e.g. after booking new appointment)
   useEffect(() => {
-    fetchQueueData();
-  }, [fetchQueueData]);
+    if (user && user.tokenNumber) {
+      setQueueState(prev => ({
+        ...prev,
+        tokenNumber: user.tokenNumber,
+        numericToken: user.numericToken ?? prev.numericToken,
+        currentToken: user.currentToken ?? prev.currentToken,
+        patientsAhead: user.patientsAhead ?? prev.patientsAhead,
+        estimatedWaitMinutes: user.estimatedWaitMinutes ?? prev.estimatedWaitMinutes,
+        doctor: user.doctor || prev.doctor,
+        department: user.department || prev.department,
+        roomNo: user.roomNo || prev.roomNo,
+      }));
+      fetchQueueData(user.tokenNumber);
+    }
+  }, [user, fetchQueueData]);
 
   // Auto Refresh Queue every 30 seconds
   useEffect(() => {

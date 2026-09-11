@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { appointmentSchema } from '../utils/validators';
@@ -7,18 +7,22 @@ import { Button } from '../components/Button';
 import { Modal } from '../components/Modal';
 import { DEPARTMENTS, DOCTORS, DEMO_PATIENT } from '../utils/constants';
 import { downloadAppointmentPDF, triggerConfetti } from '../utils/helpers';
+import { patientService } from '../services/patientService';
+import { useAuth } from '../context/AuthContext';
 import { QRCodeSVG } from 'qrcode.react';
 import { Calendar, Clock, Stethoscope, Ticket, Download, Printer, CheckCircle2, User, FileText } from 'lucide-react';
 
 // Handles appointment validation, token confirmation, and export actions.
 export const Appointment = () => {
+  const { user, setUser } = useAuth();
   const [confirmedAppointment, setConfirmedAppointment] = useState(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const { register, handleSubmit, watch, formState: { errors } } = useForm({
+  const { register, handleSubmit, watch, setValue, formState: { errors } } = useForm({
     resolver: zodResolver(appointmentSchema),
     defaultValues: {
       department: "General Medicine",
-      doctor: "Dr. Rajeswari N.",
+      doctor: "Dr. Rajeswari R.",
       date: new Date().toISOString().split('T')[0],
       timeSlot: "10:30 AM",
       symptoms: "Routine seasonal health evaluation & mild fever"
@@ -26,20 +30,63 @@ export const Appointment = () => {
   });
 
   const selectedDepartment = watch('department');
+  const selectedDoctorName = watch('doctor');
   const availableDoctors = DOCTORS.filter(d => d.department === selectedDepartment);
 
-  const onSubmit = (data) => {
-    triggerConfetti();
-    const token = `GEN-0${Math.floor(Math.random() * 20) + 15}`;
-    setConfirmedAppointment({
-      ...data,
-      tokenNumber: token,
-      patientName: DEMO_PATIENT.name,
-      patientId: DEMO_PATIENT.id,
-      roomNo: "O.P.D Block B - Room 204",
-      patientsAhead: 6,
-      estimatedWait: "24 Mins"
-    });
+  // Auto select first doctor of newly selected department if current selection is invalid
+  useEffect(() => {
+    if (availableDoctors.length > 0) {
+      const exists = availableDoctors.some(d => d.name === selectedDoctorName);
+      if (!exists) {
+        setValue('doctor', availableDoctors[0].name);
+      }
+    }
+  }, [selectedDepartment, availableDoctors, selectedDoctorName, setValue]);
+
+  const currentDoctorObj = DOCTORS.find(d => d.name === selectedDoctorName) || availableDoctors[0] || DOCTORS[0];
+
+  const onSubmit = async (data) => {
+    setIsSubmitting(true);
+    try {
+      const docObj = DOCTORS.find(d => d.name === data.doctor) || currentDoctorObj;
+      const payload = {
+        doctor_id: docObj?.doctorId || 3,
+        doctor: data.doctor,
+        department: data.department,
+        date: data.date,
+        time_slot: data.timeSlot,
+        timeSlot: data.timeSlot,
+        symptoms: data.symptoms,
+        patient_name: user?.name || DEMO_PATIENT.name,
+        patient_id: user?.id || DEMO_PATIENT.id,
+        email: user?.email || DEMO_PATIENT.email,
+        phone: user?.phone || DEMO_PATIENT.phone
+      };
+
+      const res = await patientService.bookAppointment(payload);
+      triggerConfetti();
+
+      if (res && res.patient) {
+        setUser(res.patient);
+      }
+
+      setConfirmedAppointment({
+        ...data,
+        tokenNumber: res.tokenNumber || `OPD-0${res.numericToken || 18}`,
+        numericToken: res.numericToken || 18,
+        patientName: user?.name || DEMO_PATIENT.name,
+        patientId: user?.id || DEMO_PATIENT.id,
+        doctor: res.doctor || data.doctor,
+        department: res.department || data.department,
+        roomNo: res.roomNo || docObj.roomNo || "Room 204",
+        patientsAhead: res.patientsAhead ?? 4,
+        estimatedWait: `${Math.round(res.estimatedWaitMinutes || 20)} Mins`
+      });
+    } catch (err) {
+      console.error("Booking error:", err);
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   return (
@@ -138,16 +185,24 @@ export const Appointment = () => {
             <h4 className="font-bold text-slate-900 dark:text-white text-sm">Selected Specialist Profile</h4>
             <div className="flex items-center gap-3">
               <img
-                src={availableDoctors[0]?.avatar || DOCTORS[0].avatar}
-                alt="Doctor"
+                src={currentDoctorObj?.avatar || DOCTORS[0].avatar}
+                alt={currentDoctorObj?.name || "Doctor"}
                 className="w-14 h-14 rounded-2xl object-cover ring-2 ring-blue-500/20"
               />
               <div>
-                <h5 className="font-bold text-slate-900 dark:text-white text-sm">{availableDoctors[0]?.name || DOCTORS[0].name}</h5>
-                <p className="text-xs text-slate-500">{availableDoctors[0]?.qualification || DOCTORS[0].qualification}</p>
-                <span className="text-[10px] text-emerald-500 font-semibold">{availableDoctors[0]?.availability || DOCTORS[0].availability}</span>
+                <h5 className="font-bold text-slate-900 dark:text-white text-sm">{currentDoctorObj?.name || DOCTORS[0].name}</h5>
+                <p className="text-xs text-slate-500">{currentDoctorObj?.qualification || DOCTORS[0].qualification}</p>
+                <div className="flex items-center gap-2 mt-1">
+                  <span className="text-[10px] bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300 font-semibold px-2 py-0.5 rounded-full">{currentDoctorObj?.roomNo}</span>
+                  <span className="text-[10px] text-emerald-500 font-semibold">{currentDoctorObj?.availability || "Available Today"}</span>
+                </div>
               </div>
             </div>
+            {currentDoctorObj?.experience && (
+              <p className="text-xs text-slate-500 dark:text-slate-400 border-t border-slate-100 dark:border-slate-800 pt-3">
+                Experience: <span className="font-semibold text-slate-700 dark:text-slate-200">{currentDoctorObj.experience}</span>
+              </p>
+            )}
           </div>
         </div>
 
