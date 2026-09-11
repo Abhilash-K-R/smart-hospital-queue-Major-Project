@@ -277,10 +277,10 @@ export const ArrivalPrediction = () => {
                 onClick={handleOpenDispatchSimulator}
                 disabled={isDispatchLoading}
                 className="px-4 py-3 bg-emerald-600 hover:bg-emerald-500 active:scale-95 text-white font-bold rounded-2xl flex items-center justify-center space-x-2 shadow-lg shadow-emerald-600/20 transition-all text-sm"
-                title="Open Dual WhatsApp and SMS Alert Simulator"
+                title="Open live WhatsApp alert on your phone"
               >
-                <Smartphone className="w-4 h-4 text-emerald-200" />
-                <span>{isDispatchLoading ? 'Generating Alert...' : 'WhatsApp & SMS Dispatch'}</span>
+                <MessageSquare className="w-4 h-4 text-emerald-200" />
+                <span>{isDispatchLoading ? 'Generating Alert...' : 'Open WhatsApp Alert'}</span>
               </button>
             </div>
           </div>
@@ -321,23 +321,27 @@ export const ArrivalPrediction = () => {
               </div>
             </div>
 
-            {/* Dual channel dispatch preview highlight banner */}
+            {/* Real-time automated alert notification card */}
             <div className="p-4 bg-gradient-to-r from-emerald-500/10 via-teal-500/10 to-indigo-500/10 rounded-2xl border border-emerald-500/20 flex items-center justify-between">
               <div className="flex items-center space-x-3">
                 <div className="p-2 bg-emerald-600 text-white rounded-xl">
-                  <MessageSquare className="w-4 h-4" />
+                  <Smartphone className="w-4 h-4" />
                 </div>
                 <div>
-                  <p className="text-xs font-bold text-slate-800 dark:text-slate-200">Dual Mobile Notifications Active</p>
-                  <p className="text-[11px] text-slate-500 dark:text-slate-400">WhatsApp + SMS sent synchronously so alerts are never missed.</p>
+                  <p className="text-xs font-bold text-slate-800 dark:text-slate-200">Automated Mobile Dispatch Active</p>
+                  <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                    Live alerts sent to +91 {user?.phone || DEMO_PATIENT.phone || "9876543210"} when departure is required.
+                  </p>
                 </div>
               </div>
-              <button
-                onClick={handleOpenDispatchSimulator}
-                className="px-3 py-1.5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs font-bold text-emerald-600 dark:text-emerald-400 hover:bg-slate-50 rounded-xl transition-colors shrink-0 shadow-sm"
+              <a
+                href={`https://maps.google.com/?q=13.376230,77.097439`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="px-3 py-1.5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs font-bold text-emerald-600 dark:text-emerald-400 hover:bg-slate-50 rounded-xl transition-colors shrink-0 shadow-sm flex items-center gap-1"
               >
-                Preview Alert ➔
-              </button>
+                <Navigation className="w-3 h-3" /> Maps ➔
+              </a>
             </div>
           </div>
 
@@ -378,13 +382,6 @@ export const ArrivalPrediction = () => {
         </div>
       </div>
 
-      {/* Mobile Dispatch Modal */}
-      <MobileDispatchModal
-        isOpen={isDispatchModalOpen}
-        onClose={() => setIsDispatchModalOpen(false)}
-        dispatchData={dispatchData}
-        onTriggerBrowserNotification={handleTriggerBrowserNotification}
-      />
 
     </div>
   );

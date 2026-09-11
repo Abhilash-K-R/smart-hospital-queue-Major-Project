@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Search, Filter, MoreVertical, Check, UserMinus, PhoneForwarded, RefreshCw, AlertCircle } from 'lucide-react';
+import { Search, Filter, MoreVertical, Check, UserMinus, PhoneForwarded, RefreshCw, AlertCircle, MessageSquare, Send, Smartphone } from 'lucide-react';
 import api from '../services/api';
 
 const getTriageColor = (level) => {
@@ -18,6 +18,7 @@ const Queue = () => {
   const [actionMessage, setActionMessage] = useState('');
   const [isCallingNext, setIsCallingNext] = useState(false);
   const [updatingId, setUpdatingId] = useState(null);
+  const [dispatchingId, setDispatchingId] = useState(null);
 
   const fetchQueue = async () => {
     try {
@@ -66,6 +67,31 @@ const Queue = () => {
       setUpdatingId(null);
     }
   };
+
+  const handleDispatchAlert = async (patient) => {
+    setDispatchingId(patient.id);
+    try {
+      const res = await api.post('/notifications/dispatch-preview', {
+        appointment_id: patient.id,
+        patient_name: patient.name,
+        phone: patient.phone || "9876543210",
+        token_number: patient.tokenNumber
+      });
+      
+      const shareUrl = res.data?.whatsapp_share_url;
+      if (shareUrl) {
+        window.open(shareUrl, '_blank');
+      }
+      setActionMessage(`✅ WhatsApp & SMS departure alert dispatched to ${patient.name} (${patient.tokenNumber})`);
+      setTimeout(() => setActionMessage(''), 4000);
+    } catch (err) {
+      console.error("Error dispatching alert:", err);
+      setActionMessage(`Failed to dispatch alert for ${patient.name}`);
+    } finally {
+      setDispatchingId(null);
+    }
+  };
+
 
   const [doctorFilter, setDoctorFilter] = useState('ALL');
   const [departmentFilter, setDepartmentFilter] = useState('ALL');
@@ -208,6 +234,16 @@ const Queue = () => {
                   </td>
                   <td className="py-4 px-6 text-right">
                     <div className="flex items-center justify-end gap-2">
+                      <button 
+                        onClick={() => handleDispatchAlert(patient)}
+                        disabled={dispatchingId === patient.id}
+                        className="px-2.5 py-1 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 rounded-lg text-xs font-semibold flex items-center gap-1 transition-colors border border-emerald-300 disabled:opacity-50"
+                        title="Dispatch Leave Now WhatsApp & SMS Alert to Patient Phone"
+                      >
+                        <MessageSquare className="h-3.5 w-3.5 text-emerald-600" />
+                        {dispatchingId === patient.id ? 'Sending...' : 'Alert Patient'}
+                      </button>
+
                       {patient.status !== 'serving' && (
                         <button 
                           onClick={() => updateStatus(patient.id, 'serving')}
@@ -222,10 +258,10 @@ const Queue = () => {
                       <button 
                         onClick={() => updateStatus(patient.id, 'completed')}
                         disabled={!!updatingId}
-                        className="px-2.5 py-1 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 rounded-lg text-xs font-medium flex items-center gap-1 transition-colors border border-emerald-200 disabled:opacity-50"
+                        className="px-2.5 py-1 bg-slate-100 text-slate-700 hover:bg-slate-200 rounded-lg text-xs font-medium flex items-center gap-1 transition-colors border border-slate-300 disabled:opacity-50"
                         title="Mark Consultation Completed"
                       >
-                        <Check className="h-3.5 w-3.5" />
+                        <Check className="h-3.5 w-3.5 text-emerald-600" />
                         {updatingId === `${patient.id}-completed` ? 'Saving...' : 'Complete'}
                       </button>
                       <button 
@@ -239,6 +275,7 @@ const Queue = () => {
                       </button>
                     </div>
                   </td>
+
                 </tr>
               ))}
             </tbody>
