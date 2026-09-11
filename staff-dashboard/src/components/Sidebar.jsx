@@ -22,7 +22,7 @@ const Sidebar = () => {
   return (
     <div className="flex flex-col w-64 bg-slate-900 text-white min-h-screen border-r border-slate-800">
       <div className="h-16 flex items-center px-6 border-b border-slate-800">
-        <span className="text-lg font-bold text-blue-400 tracking-wider">SMART HOSPITAL</span>
+        <span className="text-lg font-bold text-blue-400 tracking-wider">SHRIDEVI HOSPITAL</span>
       </div>
       
       <div className="flex-1 py-6 flex flex-col gap-2 px-4">

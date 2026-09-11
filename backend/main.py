@@ -41,6 +41,7 @@ from schemas import (
     SymptomAnalyzeRequest, SymptomAnalyzeResponse, SymptomAnalyzeResult,
     QueueLogItem, QueueLogResponse,
     AppointmentBookRequest, AppointmentBookResponse,
+    DispatchNotificationRequest, DispatchNotificationResponse,
 )
 
 
@@ -961,6 +962,118 @@ def get_notifications(current_user: dict = Depends(get_current_user)):
 def mark_notification_read(notification_id: int):
     """Marks an in-app notification as read."""
     return {"success": True, "id": notification_id}
+
+
+@app.post("/notifications/dispatch-preview", response_model=DispatchNotificationResponse)
+def generate_dispatch_preview(
+    req: DispatchNotificationRequest,
+    request: Request,
+):
+    """
+    Generates dual-channel (WhatsApp + SMS) mobile dispatch notifications
+    for Shridevi Hospital & Research Hospital, Tumakuru.
+    """
+    with Session(engine) as session:
+        appt = None
+        if req.appointment_id:
+            appt = session.get(Appointment, req.appointment_id)
+        
+        if not appt:
+            # Fallback to latest pending appointment
+            appt = session.exec(
+                select(Appointment).where(Appointment.status == "pending").order_by(Appointment.id.desc())
+            ).first()
+
+        if not appt:
+            appt = session.exec(select(Appointment).order_by(Appointment.id.desc())).first()
+
+        if not appt:
+            raise HTTPException(status_code=404, detail="No active appointment found for dispatch")
+
+        patient = session.get(Patient, appt.patient_id)
+        doctor = session.get(Doctor, appt.doctor_id)
+        dept = session.get(Department, doctor.department_id) if doctor else None
+
+        pat_name = req.patient_name or (patient.name if patient else "Patient")
+        pat_phone = req.phone or (patient.phone if patient else "9876543210")
+        doc_name = doctor.name if doctor else "Dr. Rajeswari R."
+        dept_name = dept.name if dept else "General Medicine"
+        meta = DOCTOR_METADATA.get(doc_name, {})
+        room_no = meta.get("room", "Room 204")
+
+        # Live queue ahead calculation
+        appt_pos = appt.queue_position if appt.queue_position is not None else 1
+        patients_ahead = len(
+            session.exec(
+                select(Appointment).where(
+                    Appointment.doctor_id == appt.doctor_id,
+                    Appointment.status == "pending",
+                    Appointment.queue_position < appt_pos,
+                )
+            ).all()
+        )
+
+        avg_consult = doctor.avg_consult_minutes if doctor else 10
+        pred_wait = round(patients_ahead * avg_consult * 0.9, 1)
+
+        lat = req.patient_lat if req.patient_lat is not None else 13.3400
+        lng = req.patient_lng if req.patient_lng is not None else 77.1000
+        travel_time = get_travel_time_minutes(lat, lng, HOSPITAL_LAT, HOSPITAL_LNG)
+
+        should_leave = travel_time >= pred_wait or pred_wait <= 15
+        status_headline = "🚨 LEAVE HOME NOW" if should_leave else "⏳ RELAX AT HOME"
+
+        token_str = f"OPD-{appt.id:03d}"
+        maps_url = f"https://maps.google.com/?q={HOSPITAL_LAT},{HOSPITAL_LNG}"
+
+        # 1. WhatsApp Rich Text Format
+        whatsapp_text = (
+            f"🏥 *SHRIDEVI HOSPITAL, TUMAKURU*\n"
+            f"━━━━━━━━━━━━━━━━━━━━\n"
+            f"Dear *{pat_name}*,\n\n"
+            f"{'🚨 *YOUR APPOINTMENT IS APPROACHING — LEAVE NOW!*' if should_leave else 'ℹ️ *Smart OPD Queue Update*'}\n\n"
+            f"🎟️ *Token Number:* `{token_str}` (Queue Pos #{max(1, appt_pos)})\n"
+            f"👨‍⚕️ *Doctor:* {doc_name}\n"
+            f"🏢 *Department:* {dept_name} ({room_no})\n\n"
+            f"⏱️ *Estimated Travel Time:* {travel_time} mins\n"
+            f"⏳ *Remaining Wait Time:* {pred_wait} mins\n"
+            f"🚗 *AI Recommendation:* {'Leave home in 5-10 mins to avoid lounge waiting.' if should_leave else f'You can relax at home for ~{int(max(0, pred_wait - travel_time))} more minutes.'}\n\n"
+            f"📍 *Hospital Navigation:* {maps_url}\n"
+            f"📱 *Live Queue Tracker:* http://localhost:3000/queue\n\n"
+            f"_Shridevi Hospital & Research Hospital, Sira Road, Tumakuru_"
+        )
+
+        # 2. SMS Concise Text Format (Standard 160-char GSM SMS)
+        sms_text = (
+            f"[Shridevi Hospital] {pat_name}, Token {token_str} (Dr. {doc_name.replace('Dr. ', '')}, {room_no}). "
+            f"Travel: {travel_time}m, Wait: {pred_wait}m. {'LEAVE NOW' if should_leave else 'Wait at home'}. "
+            f"Nav: maps.google.com/?q={HOSPITAL_LAT},{HOSPITAL_LNG}"
+        )
+
+        # 3. WhatsApp click-to-chat URL
+        import urllib.parse
+        encoded_msg = urllib.parse.quote(whatsapp_text)
+        whatsapp_share_url = f"https://wa.me/?text={encoded_msg}"
+
+        return DispatchNotificationResponse(
+            success=True,
+            appointment_id=appt.id,
+            tokenNumber=token_str,
+            patient_name=pat_name,
+            doctor=doc_name,
+            department=dept_name,
+            roomNo=room_no,
+            phone=pat_phone,
+            travel_time_minutes=travel_time,
+            predicted_wait_minutes=pred_wait,
+            should_leave_now=should_leave,
+            status_headline=status_headline,
+            whatsapp_text=whatsapp_text,
+            sms_text=sms_text,
+            whatsapp_share_url=whatsapp_share_url,
+            google_maps_url=maps_url,
+            timestamp=datetime.utcnow().strftime("%I:%M %p"),
+        )
 
 
 # =====================================================================

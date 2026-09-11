@@ -215,8 +215,8 @@ export const Appointment = () => {
             
             <div className="p-6 bg-slate-900 text-white rounded-3xl space-y-4 border border-slate-800 shadow-2xl relative overflow-hidden">
               <div className="flex justify-between items-center text-xs text-blue-400 border-b border-slate-800 pb-3">
-                <span className="font-bold">APOLLO MEDIFLOW HOSPITALS</span>
-                <span>MediFlow Digital Pass</span>
+                <span className="font-bold">SHRIDEVI HOSPITAL, TUMAKURU</span>
+                <span>Shridevi MediFlow Pass</span>
               </div>
 
               <div className="space-y-1">
@@ -246,7 +246,7 @@ export const Appointment = () => {
               {/* QR Code Pass */}
               <div className="flex justify-center p-3 bg-white rounded-2xl w-fit mx-auto shadow-md">
                 <QRCodeSVG
-                  value={`MEDIFLOW-TOKEN:${confirmedAppointment.tokenNumber}|PATIENT:${confirmedAppointment.patientId}`}
+                  value={`SHRIDEVI-TOKEN:${confirmedAppointment.tokenNumber}|PATIENT:${confirmedAppointment.patientId}`}
                   size={100}
                 />
               </div>
@@ -257,7 +257,7 @@ export const Appointment = () => {
                 className="w-full"
                 variant="outline"
                 icon={Download}
-                onClick={() => downloadAppointmentPDF('appointment-slip-card', `MediFlow_Token_${confirmedAppointment.tokenNumber}.pdf`)}
+                onClick={() => downloadAppointmentPDF('appointment-slip-card', `Shridevi_Hospital_Token_${confirmedAppointment.tokenNumber}.pdf`)}
               >
                 Download PDF Slip
               </Button>

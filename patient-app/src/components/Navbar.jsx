@@ -49,10 +49,10 @@ export const Navbar = () => {
           </div>
           <div>
             <div className="flex items-center gap-1.5">
-              <span className="text-xl font-black tracking-tight text-slate-900 dark:text-white">MediFlow</span>
+              <span className="text-lg font-black tracking-tight text-slate-900 dark:text-white">Shridevi MediFlow</span>
               <span className="px-1.5 py-0.5 text-[10px] uppercase font-extrabold bg-cyan-500 text-white rounded-md shadow-sm">AI</span>
             </div>
-            <p className="text-[10px] font-semibold text-slate-500 dark:text-slate-400">Clinical Queue Operations</p>
+            <p className="text-[10px] font-semibold text-slate-500 dark:text-slate-400">Shridevi Hospital, Tumakuru</p>
           </div>
         </Link>
 

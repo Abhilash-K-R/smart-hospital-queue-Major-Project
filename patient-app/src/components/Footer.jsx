@@ -15,10 +15,10 @@ export const Footer = () => {
               <div className="w-10 h-10 rounded-2xl bg-blue-600 flex items-center justify-center text-white shadow-lg shadow-blue-600/30">
                 <Activity className="w-6 h-6" />
               </div>
-              <span className="text-xl font-black text-white">MediFlow AI</span>
+              <span className="text-xl font-black text-white">Shridevi MediFlow AI</span>
             </div>
             <p className="text-xs text-slate-400 leading-relaxed">
-              Hospital queue operations for doctors and compounders.
+              AI-Powered Hospital Queue & Arrival Optimization for Shridevi Hospital, Tumakuru.
             </p>
           </div>
 
@@ -47,20 +47,20 @@ export const Footer = () => {
               <div className="flex items-center gap-2 text-red-400 text-xs font-bold">
                 <Phone className="w-4 h-4" /> 24/7 Trauma Helpline
               </div>
-              <p className="text-lg font-black text-white">+91 1800 900 9999</p>
+              <p className="text-lg font-black text-white">+91 0816 2212345</p>
               <p className="text-[10px] text-slate-400">Direct admission for critical emergency cases.</p>
             </div>
             <div className="text-xs text-slate-400 space-y-1">
-              <p className="flex items-center gap-1.5"><MapPin className="w-3.5 h-3.5 text-blue-400 shrink-0" /> Apollo MediFlow Campus, Tech Hub, BLR</p>
-              <p className="flex items-center gap-1.5"><Mail className="w-3.5 h-3.5 text-cyan-400 shrink-0" /> emergency@mediflow.ai</p>
+              <p className="flex items-center gap-1.5"><MapPin className="w-3.5 h-3.5 text-blue-400 shrink-0" /> Shridevi Hospital Campus, Sira Road, Tumakuru</p>
+              <p className="flex items-center gap-1.5"><Mail className="w-3.5 h-3.5 text-cyan-400 shrink-0" /> emergency@shridevimediflow.ai</p>
             </div>
           </div>
         </div>
 
         {/* Bottom Bar */}
         <div className="pt-8 border-t border-slate-800 flex flex-col sm:flex-row items-center justify-between gap-4 text-xs text-slate-500">
-          <p>© 2026 MediFlow AI. Hospital Queue Operations.</p>
-          <p>For authorised clinical staff</p>
+          <p>© 2026 Shridevi MediFlow AI • Shridevi Hospital, Tumakuru.</p>
+          <p>AI Clinical Queue Operations</p>
         </div>
       </div>
     </footer>

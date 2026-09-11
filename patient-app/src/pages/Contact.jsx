@@ -38,18 +38,18 @@ export const Contact = () => {
               <div className="flex items-start gap-3">
                 <MapPin className="w-4 h-4 text-blue-500 shrink-0 mt-0.5" />
                 <span className="text-slate-600 dark:text-slate-300">
-                  Apollo MediFlow Super Speciality Hospital, MG Road, Tech Hub, Bengaluru - 560001
+                  Shridevi Hospital & Research Hospital, Sira Road, Tumakuru - 572106
                 </span>
               </div>
 
               <div className="flex items-center gap-3">
                 <Phone className="w-4 h-4 text-emerald-500 shrink-0" />
-                <span className="text-slate-600 dark:text-slate-300">+91 80 2345 6789 (OPD Desk)</span>
+                <span className="text-slate-600 dark:text-slate-300">+91 0816 2212345 (OPD Desk)</span>
               </div>
 
               <div className="flex items-center gap-3">
                 <Mail className="w-4 h-4 text-cyan-500 shrink-0" />
-                <span className="text-slate-600 dark:text-slate-300">opd.helpdesk@mediflow.ai</span>
+                <span className="text-slate-600 dark:text-slate-300">opd.helpdesk@shridevimediflow.ai</span>
               </div>
             </div>
           </div>

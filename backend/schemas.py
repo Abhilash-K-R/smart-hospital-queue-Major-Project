@@ -312,6 +312,34 @@ class NotificationItem(BaseModel):
     type: str  # 'alert', 'info', 'warning', 'emergency'
 
 
+class DispatchNotificationRequest(BaseModel):
+    appointment_id: Optional[int] = None
+    patient_name: Optional[str] = None
+    phone: Optional[str] = None
+    patient_lat: Optional[float] = None
+    patient_lng: Optional[float] = None
+
+
+class DispatchNotificationResponse(BaseModel):
+    success: bool = True
+    appointment_id: int
+    tokenNumber: str
+    patient_name: str
+    doctor: str
+    department: str
+    roomNo: str
+    phone: str
+    travel_time_minutes: int
+    predicted_wait_minutes: float
+    should_leave_now: bool
+    status_headline: str
+    whatsapp_text: str
+    sms_text: str
+    whatsapp_share_url: str
+    google_maps_url: str
+    timestamp: str
+
+
 # ---------------------------------------------------------------------
 # PHASE 6: STAFF DASHBOARD & EMERGENCY QUEUE SCHEMAS
 # ---------------------------------------------------------------------

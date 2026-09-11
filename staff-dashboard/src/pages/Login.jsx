@@ -33,10 +33,10 @@ const Login = () => {
           <Activity className="h-8 w-8 text-white" />
         </div>
         <h2 className="mt-2 text-center text-3xl font-extrabold text-slate-900 tracking-tight">
-          Staff Portal
+          Shridevi Hospital Staff Portal
         </h2>
         <p className="mt-2 text-center text-sm text-slate-600">
-          Smart Hospital Queue Prediction System
+          Smart Hospital Queue & Arrival Optimization System
         </p>
       </div>
 

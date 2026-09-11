@@ -2,10 +2,28 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { useQueue } from '../context/QueueContext';
 import { useAuth } from '../context/AuthContext';
 import { queueService } from '../services/queueService';
+import { notificationService } from '../services/notificationService';
 import { TopBar } from '../components/TopBar';
 import { Button } from '../components/Button';
+import MobileDispatchModal from '../components/MobileDispatchModal';
 import { DEMO_PATIENT } from '../utils/constants';
-import { Navigation, Clock, MapPin, Car, Sun, ShieldAlert, ArrowRight, CheckCircle2, Radio, RefreshCw, AlertTriangle } from 'lucide-react';
+import {
+  Navigation,
+  Clock,
+  MapPin,
+  Car,
+  Sun,
+  ShieldAlert,
+  ArrowRight,
+  CheckCircle2,
+  Radio,
+  RefreshCw,
+  AlertTriangle,
+  Smartphone,
+  MessageSquare,
+  Bell,
+  Send
+} from 'lucide-react';
 import { motion } from 'framer-motion';
 
 // Displays the live AI leave-now recommendation and manages its departure countdown.
@@ -17,6 +35,11 @@ export const ArrivalPrediction = () => {
   const [isDeparted, setIsDeparted] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [userCoords, setUserCoords] = useState({ lat: 13.340881, lng: 77.100601 }); // Tumakuru South default
+
+  // Mobile dispatch simulator state
+  const [isDispatchModalOpen, setIsDispatchModalOpen] = useState(false);
+  const [dispatchData, setDispatchData] = useState(null);
+  const [isDispatchLoading, setIsDispatchLoading] = useState(false);
 
   // Geolocation detection
   useEffect(() => {
@@ -80,6 +103,67 @@ export const ArrivalPrediction = () => {
   };
 
   const shouldLeaveNow = departureData?.should_leave_now || (secondsLeft <= 0 && !isDeparted);
+
+  // Prepare and open Dual WhatsApp & SMS Dispatch Modal
+  const handleOpenDispatchSimulator = async () => {
+    setIsDispatchLoading(true);
+    try {
+      const travelMins = departureData?.travel_time_minutes ?? queueState.trafficDurationMinutes ?? 15;
+      const waitMins = departureData?.predicted_wait_minutes ?? queueState.estimatedWaitMinutes ?? 35;
+      
+      const payload = {
+        patient_name: user?.name || DEMO_PATIENT.name,
+        phone: user?.phone || DEMO_PATIENT.phone || "9876543210",
+        token_number: user?.tokenNumber || queueState.tokenNumber || "OPD-011",
+        doctor_name: user?.doctor || queueState.doctorName || "Dr. Rajeswari R.",
+        room_number: user?.roomNo || "Room 204",
+        travel_time_minutes: travelMins,
+        buffer_minutes: 10,
+        total_travel_needed_minutes: travelMins + 10,
+        estimated_wait_minutes: waitMins,
+        should_leave_now: Boolean(shouldLeaveNow),
+        origin_address: "Tumakuru City",
+        live_tracking_url: `${window.location.origin}/queue-status`
+      };
+
+      const res = await notificationService.getDispatchPreview(payload);
+      setDispatchData(res);
+      setIsDispatchModalOpen(true);
+    } catch (err) {
+      console.error("Failed to load dispatch preview:", err);
+    } finally {
+      setIsDispatchLoading(false);
+    }
+  };
+
+  // Trigger native browser notification
+  const handleTriggerBrowserNotification = () => {
+    if (!('Notification' in window)) {
+      alert("This browser does not support desktop notifications.");
+      return;
+    }
+
+    const title = shouldLeaveNow
+      ? "🚨 SHRIDEVI HOSPITAL: Leave Now Alert!"
+      : "🔔 SHRIDEVI HOSPITAL: Smart Queue Update";
+    const body = `Token ${user?.tokenNumber || 'OPD-011'} - Est wait ${departureData?.predicted_wait_minutes ?? 25}m. Travel time ${departureData?.travel_time_minutes ?? 15}m to Sira Road campus.`;
+
+    if (Notification.permission === 'granted') {
+      new Notification(title, {
+        body,
+        icon: '/favicon.ico'
+      });
+    } else if (Notification.permission !== 'denied') {
+      Notification.requestPermission().then(permission => {
+        if (permission === 'granted') {
+          new Notification(title, {
+            body,
+            icon: '/favicon.ico'
+          });
+        }
+      });
+    }
+  };
 
   return (
     <div className="space-y-8">
@@ -177,16 +261,28 @@ export const ArrivalPrediction = () => {
               </p>
             </div>
 
-            <Button
-              size="lg"
-              variant={isDeparted ? 'accent' : shouldLeaveNow ? 'primary' : 'primary'}
-              className="w-full"
-              icon={CheckCircle2}
-              onClick={handleLeaveNow}
-              disabled={isDeparted}
-            >
-              {isDeparted ? 'Departure Confirmed (GPS Tracking)' : 'I Am Leaving Now'}
-            </Button>
+            <div className="flex flex-col sm:flex-row gap-3">
+              <Button
+                size="lg"
+                variant={isDeparted ? 'accent' : shouldLeaveNow ? 'primary' : 'primary'}
+                className="flex-1"
+                icon={CheckCircle2}
+                onClick={handleLeaveNow}
+                disabled={isDeparted}
+              >
+                {isDeparted ? 'Departure Confirmed (GPS Tracking)' : 'I Am Leaving Now'}
+              </Button>
+
+              <button
+                onClick={handleOpenDispatchSimulator}
+                disabled={isDispatchLoading}
+                className="px-4 py-3 bg-emerald-600 hover:bg-emerald-500 active:scale-95 text-white font-bold rounded-2xl flex items-center justify-center space-x-2 shadow-lg shadow-emerald-600/20 transition-all text-sm"
+                title="Open Dual WhatsApp and SMS Alert Simulator"
+              >
+                <Smartphone className="w-4 h-4 text-emerald-200" />
+                <span>{isDispatchLoading ? 'Generating Alert...' : 'WhatsApp & SMS Dispatch'}</span>
+              </button>
+            </div>
           </div>
 
           {/* Right 6 cols: Departure Calculation Breakdown */}
@@ -223,6 +319,25 @@ export const ArrivalPrediction = () => {
                 </p>
                 <p className="text-[10px] text-slate-400">Ideal Driving Condition</p>
               </div>
+            </div>
+
+            {/* Dual channel dispatch preview highlight banner */}
+            <div className="p-4 bg-gradient-to-r from-emerald-500/10 via-teal-500/10 to-indigo-500/10 rounded-2xl border border-emerald-500/20 flex items-center justify-between">
+              <div className="flex items-center space-x-3">
+                <div className="p-2 bg-emerald-600 text-white rounded-xl">
+                  <MessageSquare className="w-4 h-4" />
+                </div>
+                <div>
+                  <p className="text-xs font-bold text-slate-800 dark:text-slate-200">Dual Mobile Notifications Active</p>
+                  <p className="text-[11px] text-slate-500 dark:text-slate-400">WhatsApp + SMS sent synchronously so alerts are never missed.</p>
+                </div>
+              </div>
+              <button
+                onClick={handleOpenDispatchSimulator}
+                className="px-3 py-1.5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs font-bold text-emerald-600 dark:text-emerald-400 hover:bg-slate-50 rounded-xl transition-colors shrink-0 shadow-sm"
+              >
+                Preview Alert ➔
+              </button>
             </div>
           </div>
 
@@ -263,6 +378,15 @@ export const ArrivalPrediction = () => {
         </div>
       </div>
 
+      {/* Mobile Dispatch Modal */}
+      <MobileDispatchModal
+        isOpen={isDispatchModalOpen}
+        onClose={() => setIsDispatchModalOpen(false)}
+        dispatchData={dispatchData}
+        onTriggerBrowserNotification={handleTriggerBrowserNotification}
+      />
+
     </div>
   );
 };
+

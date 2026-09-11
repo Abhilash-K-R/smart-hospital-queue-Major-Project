@@ -69,7 +69,7 @@ export const Home = () => {
           <div className="text-center max-w-3xl mx-auto space-y-3">
             <span className="text-xs font-bold text-cyan-500 uppercase tracking-widest">Next-Gen Patient Experience</span>
             <h2 className="text-3xl sm:text-4xl font-black text-slate-900 dark:text-white">
-              Why Apollo MediFlow AI Revolutionizes Healthcare Queues
+              Why Shridevi MediFlow AI Revolutionizes Healthcare Queues
             </h2>
             <p className="text-sm text-slate-600 dark:text-slate-300">
               Combining Machine Learning queue modeling with real-time GPS traffic analysis to eliminate crowded waiting rooms completely.
