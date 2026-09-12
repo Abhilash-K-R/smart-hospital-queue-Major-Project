@@ -244,4 +244,44 @@ Full cross-system integration, real-world hospital disruption handling, and post
 ### Phase 8 — COMPLETE
 Dual mobile notification dispatch engine operational and validated.
 
-
+## Architectural Refinements & Endpoint Catalog Finalization (12 September 2026)
+**Branch:** dev-abhi  
+**Owner:** Abhilash KR  
+
+### 1. Canonical Endpoint Catalog & Deduplication (28 Routes)
+- Audited and purged redundant/obsolete endpoints (`/signup/patient`, `/login/patient`, `/predict-wait`, `/calculate-departure`, `/ai/predict-arrival`, `/appointments/{id}/queue-status`) in favor of canonical routes:
+  - **11 Patient-Facing Endpoints:**
+    - `GET /` (Health check)
+    - `POST /auth/login` (Patient authentication)
+    - `POST /patients/register` (Patient self-registration)
+    - `GET /patients/profile` & `PUT /patients/profile` (Profile management)
+    - `GET /departments` & `GET /doctors` (Hospital directory)
+    - `GET /symptom-mapping` & `PUT /symptom-mapping/{id}` (Clinical routing)
+    - `POST /appointments` & `GET /appointments/my` (Appointment management)
+    - `GET /queue/status/{token_identifier}` (Live patient queue tracking)
+    - `POST /departure-check` (Smart departure advisory engine)
+    - `GET /notifications` & `PUT /notifications/{id}/read` (In-app notification feed)
+    - `POST /notifications/dispatch-preview` (Dual WhatsApp + SMS alert formatter)
+  - **17 Staff-Facing / Triage Endpoints:**
+    - `POST /token` & `POST /auth/staff/login` (Staff authentication)
+    - `GET /staff/queue` (Live OPD queue triage view)
+    - `POST /staff/emergency-insert` (Priority emergency patient insertion)
+    - `POST /staff/queue/call-next` (Queue progression engine)
+    - `PUT /staff/appointments/{id}/status` (Appointment status override)
+    - `GET /staff/stats` (Hospital real-time operational KPIs)
+    - `GET /staff/doctors` & `PUT /staff/doctors/{id}/status` (Doctor delay & break management)
+    - `GET /staff/queue-logs` (Post-consultation wait time audit logs)
+    - `POST /staff/symptom-analyze` (AI symptom-to-specialty classification)
+    - System / Model status routes (`/system/status`, `/analytics/summary`, etc.)
+- Confirmed zero dead code and zero route duplication.
+
+### 2. Random Forest Model Limitation — Queue Length Ceiling
+- **Observation:** In testing, wait time predictions plateau at ~196.2 minutes (or ~230.6 minutes during peak hours) when the queue length ahead reaches ~10 or more patients.
+- **Root Cause & Rationale:** The synthetic training dataset (`ml-model/generate_dataset.py`) was generated using a Poisson distribution with mean $\lambda = 4$ for `queue_length_ahead`. Random Forest decision trees partition feature space into piecewise constant regions and cannot extrapolate linearly beyond the upper bound of training data splits. Consequently, queue lengths $\ge 10$ fall into the uppermost terminal leaf node.
+- **Resolution:** Retained current model without regenerating data (preserves experimental baseline for VTU project deadline). Added explicit code comments in `ml_predictor.py` and documented this characteristic as a known model boundary limitation for the final VTU report.
+
+### 3. Two-Tier Wait-Time Architecture (`apply_operational_delay_overlay`)
+- **Design:** Explicitly separated the wait-time estimation into a clean two-tier pipeline:
+  - **Tier 1 (Statistical ML Baseline):** Random Forest Regressor estimates baseline consultation wait time based on `doctor_id`, `department`, `doctor_avg_consult_minutes`, `day_of_week`, `hour_of_day`, `queue_length_ahead`, and `patient_type`.
+  - **Tier 2 (Real-Time Operational Delay Overlay):** Real-time administrative disruptions (such as doctor emergency surgeries or unforeseen delays) are managed via `apply_operational_delay_overlay(base_wait_minutes, doctor_id)` which additively layers staff-declared delay buffers $\Delta t$ onto the ML baseline.
+- **Rationale:** Aligns with Section 4.3 of the research paper (where doctor delays are dynamic runtime conditions rather than static model training features) and ensures clear code maintainability for academic review.

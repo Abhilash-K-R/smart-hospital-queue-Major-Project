@@ -47,6 +47,22 @@ from schemas import (
 doctor_delays: dict[int, dict] = {}
 
 
+def apply_operational_delay_overlay(base_wait_minutes: float, doctor_id: Optional[int]) -> float:
+    """
+    Tier 2 Operational Adjustment:
+    Applies real-time staff-declared doctor operational delay buffers on top of
+    the Tier 1 Random Forest ML baseline prediction.
+    
+    This two-tier separation ensures the statistical ML model handles historical
+    queue & time-of-day dynamics (Tier 1), while live administrative disruptions
+    (unforeseen doctor delays / breaks) are layered additively in real time (Tier 2).
+    """
+    if doctor_id and doctor_id in doctor_delays:
+        delay_mins = doctor_delays[doctor_id].get("delay_minutes", 0)
+        return round(base_wait_minutes + delay_mins, 1)
+    return round(base_wait_minutes, 1)
+
+
 from ml_predictor import predict_wait
 from auth import hash_password, verify_password, create_access_token, get_current_user
 from datetime import datetime, timedelta
@@ -340,7 +356,8 @@ def check_departure_time(
         # Format the ID to match the trained one-hot dummy columns.
         doctor_code = f"DOC{doctor.id}"
 
-        prediction = predict_wait(
+        # Tier 1: Statistical ML baseline prediction (Random Forest)
+        ml_prediction = predict_wait(
             doctor_id=doctor_code,
             department=department_name,
             doctor_avg_consult_minutes=doctor.avg_consult_minutes,
@@ -349,12 +366,10 @@ def check_departure_time(
             queue_length_ahead=patients_ahead,
             patient_type="normal",
         )
-        predicted_wait = float(prediction["predicted_minutes"])
+        base_predicted_wait = float(ml_prediction["predicted_minutes"])
 
-        # Phase 7: Add doctor delay buffer if doctor is flagged as Delayed or has delay_minutes
-        if doctor.id in doctor_delays:
-            delay_mins = doctor_delays[doctor.id].get("delay_minutes", 0)
-            predicted_wait = round(predicted_wait + delay_mins, 1)
+        # Tier 2: Real-time operational delay overlay (staff disruption buffer)
+        predicted_wait = apply_operational_delay_overlay(base_predicted_wait, doctor.id)
 
         travel_time = get_travel_time_minutes(
             request.patient_lat, request.patient_lng, HOSPITAL_LAT, HOSPITAL_LNG
@@ -959,15 +974,16 @@ def staff_login(req: StaffLoginRequest):
 
 
 def calculate_predicted_wait(doctor, department_name: str, queue_pos: int, patient_type: str = "normal") -> float:
-    delay_buf = 0
-    if doctor and doctor.id in doctor_delays:
-        delay_buf = doctor_delays[doctor.id].get("delay_minutes", 0)
-
+    """
+    Two-Tier Wait Time Computation for Staff Live Queue & Logs:
+      - Tier 1: Random Forest ML Baseline Prediction
+      - Tier 2: Real-Time Operational Delay Overlay
+    """
     try:
         now = datetime.utcnow()
         doc_code = f"DOC{doctor.id}" if doctor else "DOC1"
         avg_mins = doctor.avg_consult_minutes if doctor else 15
-        pred = predict_wait(
+        ml_pred = predict_wait(
             doctor_id=doc_code,
             department=department_name or "General Medicine",
             doctor_avg_consult_minutes=avg_mins,
@@ -976,10 +992,12 @@ def calculate_predicted_wait(doctor, department_name: str, queue_pos: int, patie
             queue_length_ahead=max(0, queue_pos - 1),
             patient_type=patient_type,
         )
-        return round(float(pred["predicted_minutes"]) + delay_buf, 1)
+        base_wait = float(ml_pred["predicted_minutes"])
     except Exception:
         avg_mins = doctor.avg_consult_minutes if doctor else 15
-        return round(float(max(1, queue_pos) * avg_mins) + delay_buf, 1)
+        base_wait = float(max(1, queue_pos) * avg_mins)
+
+    return apply_operational_delay_overlay(base_wait, doctor.id if doctor else None)
 
 
 @app.get("/staff/queue", response_model=List[StaffQueueItem])
