@@ -3,9 +3,11 @@ import { useQueue } from '../context/QueueContext';
 import { useAuth } from '../context/AuthContext';
 import { queueService } from '../services/queueService';
 import { notificationService } from '../services/notificationService';
+import { useLocationResolver } from '../hooks/useLocationResolver';
 import { TopBar } from '../components/TopBar';
 import { Button } from '../components/Button';
 import MobileDispatchModal from '../components/MobileDispatchModal';
+import LocationOriginSelector from '../components/LocationOriginSelector';
 import { DEMO_PATIENT } from '../utils/constants';
 import {
   Navigation,
@@ -22,49 +24,48 @@ import {
   Smartphone,
   MessageSquare,
   Bell,
-  Send
+  Send,
+  Compass,
+  Users,
+  Edit3
 } from 'lucide-react';
 import { motion } from 'framer-motion';
 
-// Displays the live AI leave-now recommendation and manages its departure countdown.
+// Displays the live AI leave-now recommendation with Dual-Mode Location Handling (Live GPS + Family/Pincode Mode)
 export const ArrivalPrediction = () => {
   const { queueState } = useQueue();
   const { user } = useAuth();
+  
+  // Dual-Mode Location Resolver Hook
+  const {
+    locationState,
+    coords,
+    mode,
+    isGPS,
+    isFamilyBooking,
+    label: locationLabel,
+    isLocating,
+    setLiveGPSMode,
+    setManualLocationByPincode
+  } = useLocationResolver();
+
+  const [isLocationModalOpen, setIsLocationModalOpen] = useState(false);
   const [departureData, setDepartureData] = useState(null);
   const [secondsLeft, setSecondsLeft] = useState(600);
   const [isDeparted, setIsDeparted] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
-  const [userCoords, setUserCoords] = useState({ lat: 13.340881, lng: 77.100601 }); // Tumakuru South default
 
   // Mobile dispatch simulator state
   const [isDispatchModalOpen, setIsDispatchModalOpen] = useState(false);
   const [dispatchData, setDispatchData] = useState(null);
   const [isDispatchLoading, setIsDispatchLoading] = useState(false);
 
-  // Geolocation detection
-  useEffect(() => {
-    if ('geolocation' in navigator) {
-      navigator.geolocation.getCurrentPosition(
-        (pos) => {
-          setUserCoords({
-            lat: pos.coords.latitude,
-            lng: pos.coords.longitude
-          });
-        },
-        () => {
-          // Keep default Tumakuru coordinates if blocked
-        },
-        { timeout: 5000 }
-      );
-    }
-  }, []);
-
-  // Fetch real departure prediction from FastAPI backend
+  // Fetch real departure prediction from FastAPI backend based on active resolved coordinates
   const fetchPrediction = useCallback(async () => {
     setIsLoading(true);
     try {
       const apptId = user?.appointment_id || user?.appointmentId || 0;
-      const res = await queueService.checkDeparture(apptId, userCoords.lat, userCoords.lng);
+      const res = await queueService.checkDeparture(apptId, coords.lat, coords.lng);
       setDepartureData(res);
       if (res && typeof res.recommendedLeaveInMinutes === 'number') {
         setSecondsLeft(Math.max(0, Math.round(res.recommendedLeaveInMinutes * 60)));
@@ -74,9 +75,9 @@ export const ArrivalPrediction = () => {
     } finally {
       setIsLoading(false);
     }
-  }, [user, userCoords]);
+  }, [user, coords.lat, coords.lng]);
 
-  // Initial load and periodic re-check every 30s
+  // Initial load and periodic re-check every 30s or when coordinates change
   useEffect(() => {
     fetchPrediction();
     const interval = setInterval(fetchPrediction, 30000);
@@ -122,7 +123,7 @@ export const ArrivalPrediction = () => {
         total_travel_needed_minutes: travelMins + 10,
         estimated_wait_minutes: waitMins,
         should_leave_now: Boolean(shouldLeaveNow),
-        origin_address: "Tumakuru City",
+        origin_address: locationState?.name || "Tumakuru City",
         live_tracking_url: `${window.location.origin}/queue-status`
       };
 
@@ -136,38 +137,49 @@ export const ArrivalPrediction = () => {
     }
   };
 
-  // Trigger native browser notification
-  const handleTriggerBrowserNotification = () => {
-    if (!('Notification' in window)) {
-      alert("This browser does not support desktop notifications.");
-      return;
-    }
-
-    const title = shouldLeaveNow
-      ? "🚨 SHRIDEVI HOSPITAL: Leave Now Alert!"
-      : "🔔 SHRIDEVI HOSPITAL: Smart Queue Update";
-    const body = `Token ${user?.tokenNumber || 'OPD-011'} - Est wait ${departureData?.predicted_wait_minutes ?? 25}m. Travel time ${departureData?.travel_time_minutes ?? 15}m to Sira Road campus.`;
-
-    if (Notification.permission === 'granted') {
-      new Notification(title, {
-        body,
-        icon: '/favicon.ico'
-      });
-    } else if (Notification.permission !== 'denied') {
-      Notification.requestPermission().then(permission => {
-        if (permission === 'granted') {
-          new Notification(title, {
-            body,
-            icon: '/favicon.ico'
-          });
-        }
-      });
-    }
-  };
-
   return (
     <div className="space-y-8">
       <TopBar title="AI Leave Now Departure Optimization" subtitle="Google Maps Traffic & OPD Queue Synchronization" />
+
+      {/* Dual-Mode Location Origin Indicator Card */}
+      <div className="p-4 sm:p-5 rounded-2xl bg-gradient-to-r from-blue-500/10 via-indigo-500/10 to-teal-500/10 border border-blue-500/20 backdrop-blur-sm flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+        <div className="flex items-center gap-3.5">
+          <div className={`p-3 rounded-2xl shrink-0 ${
+            isGPS 
+              ? 'bg-blue-600 text-white shadow-lg shadow-blue-500/20' 
+              : 'bg-purple-600 text-white shadow-lg shadow-purple-500/20'
+          }`}>
+            {isGPS ? <Navigation className="w-5 h-5 animate-pulse" /> : <Users className="w-5 h-5" />}
+          </div>
+          <div className="space-y-0.5">
+            <div className="flex items-center gap-2">
+              <span className="text-[10px] font-bold uppercase tracking-widest px-2 py-0.5 rounded-full bg-blue-100 dark:bg-blue-900/60 text-blue-800 dark:text-blue-200">
+                {isGPS ? 'Mode A: Live GPS' : 'Mode B: Family / Remote'}
+              </span>
+              {isFamilyBooking && (
+                <span className="text-[10px] font-bold uppercase tracking-widest px-2 py-0.5 rounded-full bg-purple-100 dark:bg-purple-900/60 text-purple-800 dark:text-purple-200">
+                  Beneficiary: {locationState.beneficiaryName || 'Family Member'}
+                </span>
+              )}
+            </div>
+            <p className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-1.5">
+              <MapPin className="w-3.5 h-3.5 text-blue-500" />
+              <span>Origin: {locationState?.name || locationLabel}</span>
+            </p>
+            <p className="text-xs text-slate-500 dark:text-slate-400">
+              Coordinates: {coords.lat}, {coords.lng} • Route to Shridevi Hospital (Sira Road)
+            </p>
+          </div>
+        </div>
+
+        <button
+          onClick={() => setIsLocationModalOpen(true)}
+          className="px-4 py-2 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs font-bold text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-slate-700 rounded-xl transition-all shadow-sm flex items-center gap-1.5 shrink-0"
+        >
+          <Edit3 className="w-3.5 h-3.5" />
+          Change Origin Location
+        </button>
+      </div>
 
       {/* Main AI Departure Feature Hero Card */}
       <div className={`glass-card rounded-3xl p-6 sm:p-10 space-y-8 border-2 relative overflow-hidden transition-all duration-500 ${
@@ -196,7 +208,7 @@ export const ArrivalPrediction = () => {
               </span>
               <h2 className="text-2xl font-black text-slate-900 dark:text-white mt-0.5">
                 {isDeparted
-                  ? 'Patient En Route (GPS Tracking Active)'
+                  ? 'Patient En Route (Live Navigation Active)'
                   : shouldLeaveNow
                   ? '🚨 Critical: Leave Home Now!'
                   : 'Optimal Leave Time Recommendation'}
@@ -270,7 +282,7 @@ export const ArrivalPrediction = () => {
                 onClick={handleLeaveNow}
                 disabled={isDeparted}
               >
-                {isDeparted ? 'Departure Confirmed (GPS Tracking)' : 'I Am Leaving Now'}
+                {isDeparted ? 'Departure Confirmed' : 'I Am Leaving Now'}
               </Button>
 
               <button
@@ -354,7 +366,9 @@ export const ArrivalPrediction = () => {
         <div className="flex items-center justify-between">
           <div>
             <h3 className="text-lg font-bold text-slate-900 dark:text-white">Live Route & Traffic Simulation Map</h3>
-            <p className="text-xs text-slate-500">From Patient Residence (Tumakuru) → Shridevi Hospital & Research Hospital, SIET Campus</p>
+            <p className="text-xs text-slate-500">
+              From: {locationState?.name || 'Patient Residence'} → Shridevi Hospital & Research Hospital, SIET Campus
+            </p>
           </div>
           <span className="px-3 py-1 bg-emerald-500/10 text-emerald-600 rounded-full text-xs font-bold border border-emerald-500/30">
             Route Clear • {departureData?.travel_time_minutes ?? 12} mins
@@ -371,19 +385,39 @@ export const ArrivalPrediction = () => {
           </svg>
 
           {/* Patient start node */}
-          <div className="absolute left-12 bottom-12 p-3 bg-blue-600 text-white rounded-2xl shadow-lg flex items-center gap-2 text-xs font-bold">
-            <MapPin className="w-4 h-4" /> Patient Home (Tumakuru)
+          <div className="absolute left-6 sm:left-12 bottom-12 p-3 bg-blue-600 text-white rounded-2xl shadow-lg flex items-center gap-2 text-xs font-bold max-w-xs truncate">
+            <MapPin className="w-4 h-4 shrink-0" />
+            <span className="truncate">{locationState?.name || 'Patient Origin'}</span>
           </div>
 
           {/* Hospital destination node */}
-          <div className="absolute right-12 top-12 p-3 bg-red-600 text-white rounded-2xl shadow-lg flex items-center gap-2 text-xs font-bold">
-            <Navigation className="w-4 h-4 animate-bounce" /> Shridevi Hospital OPD
+          <div className="absolute right-6 sm:right-12 top-12 p-3 bg-red-600 text-white rounded-2xl shadow-lg flex items-center gap-2 text-xs font-bold">
+            <Navigation className="w-4 h-4 animate-bounce shrink-0" /> Shridevi Hospital OPD
           </div>
         </div>
       </div>
 
+      {/* Dual WhatsApp & SMS Dispatch Modal */}
+      <MobileDispatchModal
+        isOpen={isDispatchModalOpen}
+        onClose={() => setIsDispatchModalOpen(false)}
+        dispatchData={dispatchData}
+        patientName={user?.name || DEMO_PATIENT.name}
+        phone={user?.phone || DEMO_PATIENT.phone || "9876543210"}
+      />
+
+      {/* Dual Mode Location Origin Picker Modal */}
+      <LocationOriginSelector
+        isOpen={isLocationModalOpen}
+        onClose={() => setIsLocationModalOpen(false)}
+        currentLocation={locationState}
+        onSelectGPS={setLiveGPSMode}
+        onSelectManual={setManualLocationByPincode}
+        isLocating={isLocating}
+      />
 
     </div>
   );
 };
 
+export default ArrivalPrediction;

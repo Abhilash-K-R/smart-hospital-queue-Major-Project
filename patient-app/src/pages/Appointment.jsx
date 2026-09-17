@@ -5,18 +5,47 @@ import { appointmentSchema } from '../utils/validators';
 import { TopBar } from '../components/TopBar';
 import { Button } from '../components/Button';
 import { Modal } from '../components/Modal';
+import { LocationOriginSelector } from '../components/LocationOriginSelector';
+import { useLocationResolver } from '../hooks/useLocationResolver';
 import { DEPARTMENTS, DOCTORS, DEMO_PATIENT } from '../utils/constants';
 import { downloadAppointmentPDF, triggerConfetti } from '../utils/helpers';
 import { patientService } from '../services/patientService';
 import { useAuth } from '../context/AuthContext';
 import { QRCodeSVG } from 'qrcode.react';
-import { Calendar, Clock, Stethoscope, Ticket, Download, Printer, CheckCircle2, User, FileText } from 'lucide-react';
+import {
+  Calendar,
+  Clock,
+  Stethoscope,
+  Ticket,
+  Download,
+  Printer,
+  CheckCircle2,
+  User,
+  FileText,
+  MapPin,
+  Navigation,
+  Users,
+  Edit3
+} from 'lucide-react';
 
-// Handles appointment validation, token confirmation, and export actions.
+// Handles appointment validation, token confirmation, location origin setting, and export actions.
 export const Appointment = () => {
   const { user, setUser } = useAuth();
   const [confirmedAppointment, setConfirmedAppointment] = useState(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isLocationModalOpen, setIsLocationModalOpen] = useState(false);
+
+  // Dual Mode Location Hook
+  const {
+    locationState,
+    coords,
+    isGPS,
+    isFamilyBooking,
+    label: locationLabel,
+    isLocating,
+    setLiveGPSMode,
+    setManualLocationByPincode
+  } = useLocationResolver();
 
   const { register, handleSubmit, watch, setValue, formState: { errors } } = useForm({
     resolver: zodResolver(appointmentSchema),
@@ -60,14 +89,24 @@ export const Appointment = () => {
         patient_name: user?.name || DEMO_PATIENT.name,
         patient_id: user?.id || DEMO_PATIENT.id,
         email: user?.email || DEMO_PATIENT.email,
-        phone: user?.phone || DEMO_PATIENT.phone
+        phone: user?.phone || DEMO_PATIENT.phone,
+        patient_lat: coords.lat,
+        patient_lng: coords.lng,
+        origin_name: locationState?.name || "Tumakuru South",
+        origin_mode: locationState?.mode || "gps",
+        is_family_booking: isFamilyBooking
       };
 
       const res = await patientService.bookAppointment(payload);
       triggerConfetti();
 
       if (res && res.patient) {
-        setUser(res.patient);
+        setUser({
+          ...res.patient,
+          patient_lat: coords.lat,
+          patient_lng: coords.lng,
+          origin_location: locationState
+        });
       }
 
       setConfirmedAppointment({
@@ -80,7 +119,8 @@ export const Appointment = () => {
         department: res.department || data.department,
         roomNo: res.roomNo || docObj.roomNo || "Room 204",
         patientsAhead: res.patientsAhead ?? 4,
-        estimatedWait: `${Math.round(res.estimatedWaitMinutes || 20)} Mins`
+        estimatedWait: `${Math.round(res.estimatedWaitMinutes || 20)} Mins`,
+        originLocation: locationState?.name || locationLabel
       });
     } catch (err) {
       console.error("Booking error:", err);
@@ -152,128 +192,196 @@ export const Appointment = () => {
                     {...register('timeSlot')}
                     className="w-full px-3 py-2.5 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
                   >
-                    {['09:00 AM', '10:00 AM', '10:30 AM', '11:15 AM', '12:00 PM', '04:30 PM', '06:00 PM'].map(t => (
-                      <option key={t} value={t}>{t}</option>
-                    ))}
+                    <option value="09:00 AM">09:00 AM - Morning Shift</option>
+                    <option value="10:30 AM">10:30 AM - Prime Peak Shift</option>
+                    <option value="12:00 PM">12:00 PM - Midday Consultation</option>
+                    <option value="02:30 PM">02:30 PM - Afternoon OPD</option>
+                    <option value="04:00 PM">04:00 PM - Evening Clinic</option>
                   </select>
                 </div>
               </div>
 
+              {/* Symptoms / Chief Complaint */}
               <div className="space-y-1.5">
                 <label className="block text-xs font-semibold uppercase tracking-wider text-slate-600 dark:text-slate-300">
-                  Brief Medical Reason / Symptoms
+                  Primary Symptoms / Medical Concern *
                 </label>
                 <textarea
-                  rows={3}
-                  placeholder="Describe your health complaint..."
                   {...register('symptoms')}
-                  className="w-full px-4 py-2.5 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  rows={3}
+                  placeholder="Describe your primary symptoms (e.g., severe chest tightness, high grade fever, chronic cough...)"
+                  className="w-full px-3 py-2.5 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
                 />
+                {errors.symptoms && (
+                  <p className="text-xs text-rose-500">{errors.symptoms.message}</p>
+                )}
               </div>
 
-              <Button type="submit" size="lg" className="w-full" icon={Ticket}>
-                Confirm Appointment & Issue Token
-              </Button>
+              {/* Departure Location Origin Box */}
+              <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-800 space-y-3">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <MapPin className="w-4 h-4 text-blue-500" />
+                    <span className="text-xs font-bold uppercase tracking-wider text-slate-700 dark:text-slate-300">
+                      Departure Location Origin
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setIsLocationModalOpen(true)}
+                    className="text-xs font-bold text-blue-600 dark:text-blue-400 hover:underline flex items-center gap-1"
+                  >
+                    <Edit3 className="w-3.5 h-3.5" /> Change
+                  </button>
+                </div>
 
+                <div className="flex items-center justify-between p-3 bg-white dark:bg-slate-800/80 rounded-xl border border-slate-200 dark:border-slate-700">
+                  <div className="flex items-center gap-2.5">
+                    {isGPS ? (
+                      <Navigation className="w-4 h-4 text-blue-500 animate-pulse shrink-0" />
+                    ) : (
+                      <Users className="w-4 h-4 text-purple-500 shrink-0" />
+                    )}
+                    <div>
+                      <p className="text-xs font-bold text-slate-900 dark:text-white">
+                        {locationState?.name || locationLabel}
+                      </p>
+                      <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                        {isGPS ? 'Auto-detected device GPS' : `PIN ${locationState.pincode} (Family/Remote Origin)`}
+                      </p>
+                    </div>
+                  </div>
+                  <span className="text-[10px] font-bold uppercase tracking-wider bg-blue-100 dark:bg-blue-900/50 text-blue-800 dark:text-blue-200 px-2 py-0.5 rounded-md">
+                    {isGPS ? 'Live GPS' : 'Manual PIN'}
+                  </span>
+                </div>
+              </div>
+
+              {/* Submit Button */}
+              <Button
+                type="submit"
+                variant="primary"
+                size="lg"
+                className="w-full"
+                loading={isSubmitting}
+                icon={Ticket}
+              >
+                {isSubmitting ? 'Allocating OPD Queue Token...' : 'Confirm Appointment & Generate Token'}
+              </Button>
             </form>
           </div>
         </div>
 
-        {/* Doctor Summary & Info (4 cols) */}
+        {/* Right Info Cards (4 cols) */}
         <div className="lg:col-span-4 space-y-6">
           <div className="glass-card rounded-3xl p-6 space-y-4">
-            <h4 className="font-bold text-slate-900 dark:text-white text-sm">Selected Specialist Profile</h4>
-            <div className="flex items-center gap-3">
-              <img
-                src={currentDoctorObj?.avatar || DOCTORS[0].avatar}
-                alt={currentDoctorObj?.name || "Doctor"}
-                className="w-14 h-14 rounded-2xl object-cover ring-2 ring-blue-500/20"
-              />
-              <div>
-                <h5 className="font-bold text-slate-900 dark:text-white text-sm">{currentDoctorObj?.name || DOCTORS[0].name}</h5>
-                <p className="text-xs text-slate-500">{currentDoctorObj?.qualification || DOCTORS[0].qualification}</p>
-                <div className="flex items-center gap-2 mt-1">
-                  <span className="text-[10px] bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300 font-semibold px-2 py-0.5 rounded-full">{currentDoctorObj?.roomNo}</span>
-                  <span className="text-[10px] text-emerald-500 font-semibold">{currentDoctorObj?.availability || "Available Today"}</span>
-                </div>
+            <h4 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
+              <Stethoscope className="w-4 h-4 text-blue-500" /> Specialist Roster Info
+            </h4>
+            <div className="space-y-3 text-xs text-slate-600 dark:text-slate-400">
+              <div className="p-3 bg-slate-50 dark:bg-slate-900 rounded-xl space-y-1">
+                <p className="font-bold text-slate-900 dark:text-white">{currentDoctorObj.name}</p>
+                <p className="text-[11px] text-blue-600 dark:text-blue-400">{currentDoctorObj.qualification}</p>
+                <p className="text-[11px] text-slate-500">{currentDoctorObj.experience} • {currentDoctorObj.roomNo}</p>
+              </div>
+              <div className="flex items-center justify-between text-[11px] p-2 bg-blue-50 dark:bg-blue-950/40 rounded-lg text-blue-800 dark:text-blue-300 font-semibold">
+                <span>Avg Consultation Speed:</span>
+                <span>{currentDoctorObj.avgConsultTimeMinutes} mins/patient</span>
               </div>
             </div>
-            {currentDoctorObj?.experience && (
-              <p className="text-xs text-slate-500 dark:text-slate-400 border-t border-slate-100 dark:border-slate-800 pt-3">
-                Experience: <span className="font-semibold text-slate-700 dark:text-slate-200">{currentDoctorObj.experience}</span>
-              </p>
-            )}
+          </div>
+
+          <div className="glass-card rounded-3xl p-6 space-y-3 bg-gradient-to-br from-blue-600/10 to-indigo-600/10 border-blue-500/20">
+            <div className="flex items-center gap-2 text-blue-600 dark:text-blue-400 font-bold text-xs uppercase tracking-wider">
+              <Clock className="w-4 h-4" /> Zero-Lobby Waiting Protocol
+            </div>
+            <p className="text-xs text-slate-600 dark:text-slate-400 leading-relaxed">
+              Once booked, Shridevi MediFlow monitors live queue movement against your commute distance and issues a WhatsApp / SMS Leave-Now advisory so you arrive right on time.
+            </p>
           </div>
         </div>
 
       </div>
 
-      {/* CONFIRMED APPOINTMENT SLIP MODAL */}
+      {/* Confirmation Modal */}
       {confirmedAppointment && (
-        <Modal isOpen={!!confirmedAppointment} onClose={() => setConfirmedAppointment(null)} title="OPD Appointment Pass Generated">
-          <div className="space-y-6 text-center" id="appointment-slip-card">
-            
-            <div className="p-6 bg-slate-900 text-white rounded-3xl space-y-4 border border-slate-800 shadow-2xl relative overflow-hidden">
-              <div className="flex justify-between items-center text-xs text-blue-400 border-b border-slate-800 pb-3">
-                <span className="font-bold">SHRIDEVI HOSPITAL, TUMAKURU</span>
-                <span>Shridevi MediFlow Pass</span>
-              </div>
+        <Modal
+          isOpen={Boolean(confirmedAppointment)}
+          onClose={() => setConfirmedAppointment(null)}
+          title="Digital OPD Token Allocated"
+        >
+          <div className="space-y-6 text-center">
+            <div className="w-16 h-16 bg-emerald-100 dark:bg-emerald-950/60 rounded-full flex items-center justify-center mx-auto text-emerald-600 dark:text-emerald-400">
+              <CheckCircle2 className="w-8 h-8" />
+            </div>
 
-              <div className="space-y-1">
-                <span className="text-xs uppercase font-bold text-slate-400">ASSIGNED TOKEN</span>
-                <p className="text-5xl font-black text-blue-400 tracking-tight">{confirmedAppointment.tokenNumber}</p>
-              </div>
+            <div className="space-y-1">
+              <span className="text-xs font-bold uppercase tracking-widest text-slate-400">Official Queue Token</span>
+              <p className="text-4xl font-black font-mono text-blue-600 dark:text-blue-400">
+                {confirmedAppointment.tokenNumber}
+              </p>
+              <p className="text-xs text-slate-500">{confirmedAppointment.department} • {confirmedAppointment.roomNo}</p>
+            </div>
 
-              <div className="grid grid-cols-2 gap-2 text-xs text-left bg-slate-800/60 p-3 rounded-2xl">
-                <div>
-                  <span className="text-slate-400 block">Patient</span>
-                  <span className="font-bold">{confirmedAppointment.patientName}</span>
-                </div>
-                <div>
-                  <span className="text-slate-400 block">Doctor</span>
-                  <span className="font-bold">{confirmedAppointment.doctor}</span>
-                </div>
-                <div>
-                  <span className="text-slate-400 block">Slot</span>
-                  <span className="font-bold">{confirmedAppointment.timeSlot} ({confirmedAppointment.date})</span>
-                </div>
-                <div>
-                  <span className="text-slate-400 block">Room</span>
-                  <span className="font-bold">{confirmedAppointment.roomNo}</span>
-                </div>
+            <div className="p-4 bg-slate-50 dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 grid grid-cols-2 gap-3 text-left text-xs">
+              <div>
+                <span className="text-slate-400 text-[10px] uppercase font-bold">Doctor</span>
+                <p className="font-bold text-slate-800 dark:text-slate-200">{confirmedAppointment.doctor}</p>
               </div>
+              <div>
+                <span className="text-slate-400 text-[10px] uppercase font-bold">Time Slot</span>
+                <p className="font-bold text-slate-800 dark:text-slate-200">{confirmedAppointment.timeSlot}</p>
+              </div>
+              <div>
+                <span className="text-slate-400 text-[10px] uppercase font-bold">Patients Ahead</span>
+                <p className="font-bold text-blue-600">{confirmedAppointment.patientsAhead} Patients</p>
+              </div>
+              <div>
+                <span className="text-slate-400 text-[10px] uppercase font-bold">Est Wait</span>
+                <p className="font-bold text-emerald-600">{confirmedAppointment.estimatedWait}</p>
+              </div>
+            </div>
 
-              {/* QR Code Pass */}
-              <div className="flex justify-center p-3 bg-white rounded-2xl w-fit mx-auto shadow-md">
-                <QRCodeSVG
-                  value={`SHRIDEVI-TOKEN:${confirmedAppointment.tokenNumber}|PATIENT:${confirmedAppointment.patientId}`}
-                  size={100}
-                />
-              </div>
+            {/* QR Code */}
+            <div className="flex justify-center p-3 bg-white rounded-xl shadow-inner w-fit mx-auto border border-slate-200">
+              <QRCodeSVG value={`SHRIDEVI-TOKEN:${confirmedAppointment.tokenNumber}`} size={110} />
             </div>
 
             <div className="flex gap-3">
               <Button
-                className="w-full"
                 variant="outline"
+                size="md"
+                className="flex-1"
                 icon={Download}
-                onClick={() => downloadAppointmentPDF('appointment-slip-card', `Shridevi_Hospital_Token_${confirmedAppointment.tokenNumber}.pdf`)}
+                onClick={() => downloadAppointmentPDF(confirmedAppointment)}
               >
-                Download PDF Slip
+                Download PDF
               </Button>
-
               <Button
-                className="w-full"
-                icon={Printer}
-                onClick={() => window.print()}
+                variant="primary"
+                size="md"
+                className="flex-1"
+                onClick={() => setConfirmedAppointment(null)}
               >
-                Print Token
+                Done
               </Button>
             </div>
           </div>
         </Modal>
       )}
 
+      {/* Dual Mode Location Origin Picker Modal */}
+      <LocationOriginSelector
+        isOpen={isLocationModalOpen}
+        onClose={() => setIsLocationModalOpen(false)}
+        currentLocation={locationState}
+        onSelectGPS={setLiveGPSMode}
+        onSelectManual={setManualLocationByPincode}
+        isLocating={isLocating}
+      />
+
     </div>
   );
 };
+
+export default Appointment;
