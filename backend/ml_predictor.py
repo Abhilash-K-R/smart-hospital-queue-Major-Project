@@ -48,6 +48,7 @@ def predict_wait(
     ])
     input_encoded = input_encoded.reindex(columns=model_columns, fill_value=0)
 
+    # Note: Random Forest predictions plateau beyond ~10 patients ahead due to training data range (Poisson λ=4) — this is a known model limitation, not a bug.
     predicted_minutes = model.predict(input_encoded)[0]
     range_low = predicted_minutes * 0.85
     range_high = predicted_minutes * 1.15
