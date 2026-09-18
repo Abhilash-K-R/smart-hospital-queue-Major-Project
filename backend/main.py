@@ -292,8 +292,68 @@ def get_my_appointments(current_user: dict = Depends(get_current_user)):
 
 
 # ---------------------------------------------------------------------
-# DEPARTURE-TIME NOTIFICATION LOGIC
+# DEPARTURE-TIME NOTIFICATION & AUTOMATED SMS DISPATCH
 # ---------------------------------------------------------------------
+
+def send_automated_sms(phone: str, message: str) -> dict:
+    """
+    Dispatches an automated SMS alert via Fast2SMS Quick SMS gateway.
+    Optimized for GSM 7-bit English encoding under 140 characters (1 SMS credit).
+    """
+    import re
+    import requests
+    
+    api_key = os.getenv("FAST2SMS_API_KEY")
+    if not api_key:
+        print("[Fast2SMS] FAST2SMS_API_KEY not found in environment.")
+        return {"success": False, "error": "FAST2SMS_API_KEY not configured"}
+
+    # Clean phone number: remove non-digits, country code +91 or 91 if 12 digits
+    clean_phone = re.sub(r"\D", "", str(phone))
+    if len(clean_phone) > 10 and clean_phone.startswith("91"):
+        clean_phone = clean_phone[2:]
+    
+    if len(clean_phone) != 10:
+        print(f"[Fast2SMS] Invalid 10-digit mobile number: {phone} (cleaned: {clean_phone})")
+        return {"success": False, "error": "Invalid Indian mobile number"}
+
+    # Strictly enforce GSM 7-bit ASCII: replace unicode quotes/dashes/tildes and strip emojis
+    clean_msg = (
+        message.replace("—", "-")
+        .replace("–", "-")
+        .replace("~", "")
+        .replace("“", '"')
+        .replace("”", '"')
+        .replace("‘", "'")
+        .replace("’", "'")
+    )
+    clean_msg = clean_msg.encode("ascii", "ignore").decode("ascii").strip()
+
+    url = "https://www.fast2sms.com/dev/bulkV2"
+    headers = {
+        "authorization": api_key,
+        "Content-Type": "application/json"
+    }
+    payload = {
+        "route": "q",
+        "message": clean_msg,
+        "language": "english",
+        "flash": 0,
+        "numbers": clean_phone
+    }
+
+    try:
+        response = requests.post(url, headers=headers, json=payload, timeout=10)
+        res_data = response.json()
+        print(f"[Fast2SMS] SMS dispatch response for {clean_phone}:", res_data)
+        return {
+            "success": res_data.get("return", False) is True,
+            "response": res_data
+        }
+    except Exception as e:
+        print(f"[Fast2SMS] Failed to send SMS to {clean_phone}: {e}")
+        return {"success": False, "error": str(e)}
+
 
 @app.post("/departure-check", response_model=DepartureCheckResponse)
 def check_departure_time(
@@ -304,9 +364,9 @@ def check_departure_time(
     The core "leave now" decision logic (paper Section 4.4).
 
     Compares the patient's PREDICTED WAIT TIME against their CURRENT
-    TRAVEL TIME to the hospital. A notification is triggered once the
-    remaining wait roughly equals the travel time — so the patient
-    arrives close to their turn, not significantly early or late.
+    TRAVEL TIME + 10-MINUTE SAFETY BUFFER to the hospital.
+    A notification is triggered once travel_time + 10 >= predicted_wait,
+    ensuring the patient arrives comfortably before their token is called.
     """
     patient_id = int(current_user["sub"])
 
@@ -347,13 +407,11 @@ def check_departure_time(
             ).all()
         )
 
-        # Use today's actual day/hour so the ML prediction reflects
-        # right now, not a hardcoded test value
+        # Use today's actual day/hour so the ML prediction reflects right now
         now = datetime.utcnow()
         day_name = now.strftime("%A")
 
         # In our dataset, doctors are labeled 'DOC1' through 'DOC6'.
-        # Format the ID to match the trained one-hot dummy columns.
         doctor_code = f"DOC{doctor.id}"
 
         # Tier 1: Statistical ML baseline prediction (Random Forest)
@@ -375,16 +433,35 @@ def check_departure_time(
             request.patient_lat, request.patient_lng, HOSPITAL_LAT, HOSPITAL_LNG
         )
 
-        # The core trigger condition: leave now if travel time is close to
-        # or exceeds the remaining predicted wait — meaning if you don't
-        # leave now, you risk arriving late for your turn.
-        should_leave = travel_time >= predicted_wait
+        # Safety Buffer Logic: 10 minutes allocated for parking, walking, and check-in
+        SAFETY_BUFFER_MINUTES = 10
+        should_leave = (travel_time + SAFETY_BUFFER_MINUTES) >= predicted_wait
 
         if should_leave:
-            message = f"Leave now! Your predicted wait is {predicted_wait} min and travel takes {travel_time} min."
+            message = (
+                f"Leave now! With a 10-min safety buffer, you'll arrive comfortably before your turn "
+                f"(Travel: {travel_time}m + Buffer: {SAFETY_BUFFER_MINUTES}m vs Wait: {predicted_wait:.0f}m)."
+            )
         else:
-            buffer = predicted_wait - travel_time
-            message = f"Not yet — you can wait {buffer:.0f} more minutes before leaving."
+            buffer = predicted_wait - (travel_time + SAFETY_BUFFER_MINUTES)
+            message = f"Not yet — with a 10-min safety buffer, you can wait {buffer:.0f} more minutes before leaving."
+
+        # Automated SMS Trigger: Fires ONCE per appointment when should_leave first becomes True
+        if should_leave and not getattr(appointment, "departure_notified", False):
+            patient = session.get(Patient, appointment.patient_id)
+            if patient and patient.phone:
+                token_str = f"OPD-{appointment.id:03d}"
+                sms_body = (
+                    f"[Shridevi Hospital] Token {token_str}: "
+                    f"Leave now! With 10m buffer, visit with {doctor.name} starts in {int(predicted_wait)}m "
+                    f"(Travel: {int(travel_time)}m)."
+                )
+                sms_res = send_automated_sms(patient.phone, sms_body)
+                if sms_res.get("success"):
+                    appointment.departure_notified = True
+                    session.add(appointment)
+                    session.commit()
+                    session.refresh(appointment)
 
         return DepartureCheckResponse(
             predicted_wait_minutes=predicted_wait,
@@ -1213,6 +1290,41 @@ def call_next_patient(doctor_id: Optional[int] = None):
             "message": f"Called next patient (Appt #{next_pending.id})",
             "serving": {"id": next_pending.id, "patient_id": next_pending.patient_id}
         }
+
+
+@app.post("/staff/queue/clear-day")
+def clear_today_queue(doctor_id: Optional[int] = None):
+    """
+    Clears / resets active queue for a fresh start of the day:
+    Marks all pending/serving appointments as 'completed' and clears doctor operational delays.
+    """
+    with Session(engine) as session:
+        query = select(Appointment).where(Appointment.status.in_(["pending", "serving"]))
+        if doctor_id:
+            query = query.where(Appointment.doctor_id == doctor_id)
+
+        active_appts = session.exec(query).all()
+        cleared_count = len(active_appts)
+
+        for appt in active_appts:
+            appt.status = "completed"
+            appt.queue_position = None
+            session.add(appt)
+
+        session.commit()
+
+    # Reset doctor live operational delays
+    if doctor_id:
+        doctor_delays.pop(doctor_id, None)
+    else:
+        doctor_delays.clear()
+
+    return {
+        "success": True,
+        "cleared_appointments": cleared_count,
+        "message": f"Successfully cleared {cleared_count} active appointments. Live OPD queue is now fresh and ready."
+    }
+
 
 
 @app.put("/staff/appointments/{appointment_id}/status")

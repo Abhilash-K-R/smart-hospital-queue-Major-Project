@@ -32,7 +32,7 @@ export const Navbar = () => {
     { path: '/', label: 'Home' },
     { path: '/dashboard', label: 'Dashboard' },
     { path: '/queue-status', label: t('currentQueue', 'Live Queue') },
-    { path: '/arrival-prediction', label: t('leaveNow', 'Leave Now AI') },
+    { path: '/arrival-prediction', label: t('myAppointment', 'My Appointment') },
     { path: '/appointment', label: t('bookAppointment', 'Book Appointment') },
     { path: '/faq', label: 'FAQ' },
     { path: '/contact', label: 'Contact' }

@@ -11,8 +11,8 @@ AI-based system that predicts hospital wait times, sends proactive "leave now" d
 ## 🌟 Core System Capabilities
 
 1. **Wait-Time Prediction (Machine Learning Engine):** Random Forest Regressor predicts how long a patient will wait based on live queue position, doctor consultation speeds, disruption delay buffers, day of week, and peak hours.
-2. **AI Smart Departure Advisor (Google Maps & Haversine):** Continuously balances real-time road travel duration against predicted OPD wait times, notifying patients exactly when to leave home to achieve a Zero-Wait arrival experience.
-3. **Dual-Channel Mobile Dispatch (WhatsApp + SMS):** Synchronously dispatches rich WhatsApp notification templates (with 1-click `wa.me` links, OPD tokens, doctor room numbers, and Google Maps directions) alongside concise GSM SMS messages to guarantee 100% notification reach.
+2. **AI Smart Departure Advisor (Google Maps & Fast2SMS):** Continuously balances real-time road travel duration with a 10-minute safety buffer against predicted OPD wait times, automatically dispatching carrier SMS alerts via Fast2SMS when it is time to leave home to achieve a Zero-Wait arrival experience.
+3. **Automated & Dual-Channel Mobile Dispatch (Fast2SMS + WhatsApp):** Automatically triggers 1-credit GSM carrier SMS messages via Fast2SMS with idempotency tracking in PostgreSQL, alongside rich WhatsApp notifications with 1-click direction links.
 4. **Emergency Priority Queue Triage:** Hospital staff can immediately insert emergency walk-ins at Position #1 (`EMG-xxx`), dynamically bumping regular queues and recalculating downstream wait times in real-time.
 5. **Post-Consultation Evaluation Logging:** Live telemetry logs (`queue_logs` table in Neon Serverless PostgreSQL) tracking predicted vs actual consultation durations for model accuracy assessment.
 

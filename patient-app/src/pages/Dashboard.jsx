@@ -56,7 +56,7 @@ export const Dashboard = () => {
               <div className="w-10 h-10 mx-auto rounded-xl bg-cyan-500/10 text-cyan-500 flex items-center justify-center group-hover:scale-110 transition-transform">
                 <Navigation className="w-5 h-5" />
               </div>
-              <span className="text-xs font-bold text-slate-900 dark:text-white block">Leave Now AI</span>
+              <span className="text-xs font-bold text-slate-900 dark:text-white block">My Appointment</span>
             </button>
 
             <button
@@ -95,7 +95,7 @@ export const Dashboard = () => {
         {/* Right Column (4 cols): AI Stats & Hospital Details */}
         <div className="lg:col-span-4 space-y-6">
           
-          {/* Leave Now AI Recommendation Widget */}
+          {/* Appointment & Travel Status Widget */}
           <div className="p-6 rounded-3xl bg-gradient-to-br from-cyan-600 to-blue-700 text-white space-y-4 shadow-xl relative overflow-hidden">
             <div className="flex items-center justify-between">
               <span className="px-2.5 py-0.5 text-[10px] uppercase font-bold bg-white/20 rounded-md">Smart Arrival Engine</span>

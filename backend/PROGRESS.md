@@ -285,3 +285,29 @@ Dual mobile notification dispatch engine operational and validated.
   - **Tier 1 (Statistical ML Baseline):** Random Forest Regressor estimates baseline consultation wait time based on `doctor_id`, `department`, `doctor_avg_consult_minutes`, `day_of_week`, `hour_of_day`, `queue_length_ahead`, and `patient_type`.
   - **Tier 2 (Real-Time Operational Delay Overlay):** Real-time administrative disruptions (such as doctor emergency surgeries or unforeseen delays) are managed via `apply_operational_delay_overlay(base_wait_minutes, doctor_id)` which additively layers staff-declared delay buffers $\Delta t$ onto the ML baseline.
 - **Rationale:** Aligns with Section 4.3 of the research paper (where doctor delays are dynamic runtime conditions rather than static model training features) and ensures clear code maintainability for academic review.
+
+## Phase 9 — Fast2SMS Automated Dispatch, Safety Buffer & Real-Time Queue Continuity (18 September 2026)
+**Branch:** dev-abhi  
+**Release Tag:** v0.7.1  
+**Owner:** Abhilash KR  
+
+### 1. 10-Minute Safety Buffer Integration
+- **Implementation:** Updated `POST /departure-check` in `backend/main.py` with `SAFETY_BUFFER_MINUTES = 10` and comparison `should_leave = (travel_time + 10) >= predicted_wait`.
+- **Clinical Rationale:** Allocates realistic transit overhead (hospital parking, security screening, OPD desk token validation) so patients arrive comfortably before consultation.
+
+### 2. Fast2SMS Automated SMS Engine & 1-Credit GSM Optimization
+- **Automated Dispatch:** Integrated `send_automated_sms(phone, message)` calling Fast2SMS Quick SMS endpoint (`POST https://www.fast2sms.com/dev/bulkV2`, `route="q"`) with `FAST2SMS_API_KEY`.
+- **Single-Credit GSM 7-bit Encoding:**
+  - Enforced strict ASCII sanitization to strip non-standard Unicode (emojis `🏥`, smart quotes `“”`, em-dashes `—`, tildes `~`).
+  - Formatted message under 140 chars: `"[Shridevi Hospital] Token {token}: Leave now! With 10m buffer, visit with {doctor} starts in {wait}m (Travel: {travel}m)."`.
+  - Billed at exactly 1 SMS credit (₹5) per dispatch.
+
+### 3. Database Idempotency Flag (`departure_notified`)
+- Added `departure_notified: bool = Field(default=False)` to `Appointment` model in `backend/models.py`.
+- Synchronized database column on Neon PostgreSQL.
+- Verified once-per-appointment dispatch: `departure_notified` flips to `True` upon successful SMS delivery, preventing duplicate SMS dispatches on periodic 30s client polling.
+
+### 4. Patient App & Staff Dashboard Experience Refinements
+- **Passive Leave Now Hero Banner:** Streamlined `patient-app/src/pages/ArrivalPrediction.jsx` to be purely informational with real-time status pills.
+- **Dynamic Live Queue Continuity:** Verified that completing anterior appointments in `staff-dashboard` dynamically decreases `predicted_wait_minutes` in real-time.
+- **Live Verification:** Created and executed `test_live_sms.py` and `test_live_wait_decrease.py` validating 100% end-to-end functionality.

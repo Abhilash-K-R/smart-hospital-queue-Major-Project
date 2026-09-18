@@ -139,7 +139,77 @@ export const ArrivalPrediction = () => {
 
   return (
     <div className="space-y-8">
-      <TopBar title="AI Leave Now Departure Optimization" subtitle="Google Maps Traffic & OPD Queue Synchronization" />
+      <TopBar
+        title="My Appointment & Live Travel Guide"
+        subtitle="Real-time appointment details, OPD queue wait, distance & intelligent route navigation"
+      />
+
+      {/* Booked Appointment Overview Card */}
+      <div className="glass-card rounded-3xl p-6 sm:p-8 space-y-6 border border-slate-200 dark:border-slate-800 bg-gradient-to-br from-white via-slate-50 to-blue-50/40 dark:from-slate-900 dark:via-slate-900 dark:to-blue-950/30">
+        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 border-b border-slate-200 dark:border-slate-800 pb-4">
+          <div className="flex items-center gap-3.5">
+            <div className="w-12 h-12 rounded-2xl bg-blue-600 text-white flex items-center justify-center font-black text-lg shadow-lg shadow-blue-500/25">
+              <Ticket className="w-6 h-6" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <span className="text-[10px] font-black uppercase tracking-widest px-2.5 py-0.5 rounded-full bg-blue-100 dark:bg-blue-900/60 text-blue-800 dark:text-blue-200">
+                  Active Consultation Slot
+                </span>
+                <span className="text-xs text-slate-400 font-semibold">• Token Assigned</span>
+              </div>
+              <h2 className="text-xl font-black text-slate-900 dark:text-white mt-0.5">
+                Token {user?.tokenNumber || queueState.tokenNumber || DEMO_PATIENT.tokenNumber}
+              </h2>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <span className="px-3 py-1.5 rounded-xl bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 text-xs font-bold flex items-center gap-1.5">
+              <CheckCircle2 className="w-4 h-4" /> Slot Confirmed
+            </span>
+          </div>
+        </div>
+
+        {/* 4 Details Grid */}
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 text-xs">
+          <div className="p-3.5 bg-white dark:bg-slate-800/80 rounded-2xl border border-slate-200 dark:border-slate-700/80 space-y-1">
+            <span className="text-slate-400 text-[10px] uppercase font-bold">Attending Specialist</span>
+            <p className="font-bold text-slate-900 dark:text-white truncate">
+              {user?.doctor || queueState.doctor || DEMO_PATIENT.doctor}
+            </p>
+            <p className="text-[10px] text-blue-600 dark:text-blue-400 font-medium">
+              {user?.department || queueState.department || DEMO_PATIENT.department}
+            </p>
+          </div>
+
+          <div className="p-3.5 bg-white dark:bg-slate-800/80 rounded-2xl border border-slate-200 dark:border-slate-700/80 space-y-1">
+            <span className="text-slate-400 text-[10px] uppercase font-bold">Consultation Room</span>
+            <p className="font-bold text-slate-900 dark:text-white truncate">
+              {user?.roomNo || queueState.roomNo || DEMO_PATIENT.roomNo}
+            </p>
+            <p className="text-[10px] text-slate-500">Shridevi Hospital Sira Rd</p>
+          </div>
+
+          <div className="p-3.5 bg-white dark:bg-slate-800/80 rounded-2xl border border-slate-200 dark:border-slate-700/80 space-y-1">
+            <span className="text-slate-400 text-[10px] uppercase font-bold">Time Slot</span>
+            <p className="font-bold text-slate-900 dark:text-white">
+              {user?.timeSlot || DEMO_PATIENT.appointmentTime}
+            </p>
+            <p className="text-[10px] text-emerald-500 font-medium">Reporting Window Open</p>
+          </div>
+
+          <div className="p-3.5 bg-white dark:bg-slate-800/80 rounded-2xl border border-slate-200 dark:border-slate-700/80 space-y-1">
+            <span className="text-slate-400 text-[10px] uppercase font-bold">Patient Name</span>
+            <p className="font-bold text-slate-900 dark:text-white truncate">
+              {user?.name || DEMO_PATIENT.name}
+            </p>
+            <p className="text-[10px] text-slate-500">
+              {user?.phone || DEMO_PATIENT.phone}
+            </p>
+          </div>
+        </div>
+      </div>
 
       {/* Dual-Mode Location Origin Indicator Card */}
       <div className="p-4 sm:p-5 rounded-2xl bg-gradient-to-r from-blue-500/10 via-indigo-500/10 to-teal-500/10 border border-blue-500/20 backdrop-blur-sm flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
@@ -204,7 +274,7 @@ export const ArrivalPrediction = () => {
             </div>
             <div>
               <span className="text-[10px] uppercase font-bold text-cyan-600 dark:text-cyan-400 tracking-widest">
-                Smart Departure Engine • Shridevi Hospital Tumakuru
+                Smart Departure Sync • Shridevi Hospital Tumakuru
               </span>
               <h2 className="text-2xl font-black text-slate-900 dark:text-white mt-0.5">
                 {isDeparted
@@ -273,27 +343,12 @@ export const ArrivalPrediction = () => {
               </p>
             </div>
 
-            <div className="flex flex-col sm:flex-row gap-3">
-              <Button
-                size="lg"
-                variant={isDeparted ? 'accent' : shouldLeaveNow ? 'primary' : 'primary'}
-                className="flex-1"
-                icon={CheckCircle2}
-                onClick={handleLeaveNow}
-                disabled={isDeparted}
-              >
-                {isDeparted ? 'Departure Confirmed' : 'I Am Leaving Now'}
-              </Button>
-
-              <button
-                onClick={handleOpenDispatchSimulator}
-                disabled={isDispatchLoading}
-                className="px-4 py-3 bg-emerald-600 hover:bg-emerald-500 active:scale-95 text-white font-bold rounded-2xl flex items-center justify-center space-x-2 shadow-lg shadow-emerald-600/20 transition-all text-sm"
-                title="Open live WhatsApp alert on your phone"
-              >
-                <MessageSquare className="w-4 h-4 text-emerald-200" />
-                <span>{isDispatchLoading ? 'Generating Alert...' : 'Open WhatsApp Alert'}</span>
-              </button>
+            <div className="p-3.5 bg-slate-100 dark:bg-slate-800/80 rounded-2xl border border-slate-200 dark:border-slate-700/80 flex items-center justify-between text-xs">
+              <div className="flex items-center gap-2">
+                <div className="w-2 h-2 rounded-full bg-emerald-500 animate-ping" />
+                <span className="font-bold text-slate-700 dark:text-slate-300">Fast2SMS Automated Dispatch Active</span>
+              </div>
+              <span className="text-[11px] text-slate-500 font-semibold">SMS triggered automatically</span>
             </div>
           </div>
 
@@ -361,38 +416,80 @@ export const ArrivalPrediction = () => {
 
       </div>
 
-      {/* Live Route Preview Map Widget */}
-      <div className="glass-card rounded-3xl p-6 sm:p-8 space-y-4">
-        <div className="flex items-center justify-between">
+      {/* Live Route Navigation & Interactive Map Section */}
+      <div className="glass-card rounded-3xl p-6 sm:p-8 space-y-6 border border-slate-200 dark:border-slate-800">
+        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
           <div>
-            <h3 className="text-lg font-bold text-slate-900 dark:text-white">Live Route & Traffic Simulation Map</h3>
-            <p className="text-xs text-slate-500">
-              From: {locationState?.name || 'Patient Residence'} → Shridevi Hospital & Research Hospital, SIET Campus
+            <div className="flex items-center gap-2">
+              <Compass className="w-5 h-5 text-blue-500" />
+              <h3 className="text-lg font-bold text-slate-900 dark:text-white">Live Hospital Route & Navigation Guide</h3>
+            </div>
+            <p className="text-xs text-slate-500 mt-1">
+              From: <strong className="text-slate-800 dark:text-slate-200">{locationState?.name || locationLabel}</strong> → <strong>Shridevi Hospital & Research Hospital, SIET Campus, Sira Road</strong>
             </p>
           </div>
-          <span className="px-3 py-1 bg-emerald-500/10 text-emerald-600 rounded-full text-xs font-bold border border-emerald-500/30">
-            Route Clear • {departureData?.travel_time_minutes ?? 12} mins
-          </span>
+          <div className="flex items-center gap-2">
+            <span className="px-3 py-1 bg-emerald-500/10 text-emerald-600 rounded-full text-xs font-bold border border-emerald-500/30">
+              Optimal Route • {departureData?.travel_time_minutes ?? queueState.trafficDurationMinutes ?? 12} mins
+            </span>
+            <a
+              href={`https://www.google.com/maps/dir/?api=1&origin=${coords.lat},${coords.lng}&destination=13.376230,77.097439`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold rounded-xl transition-all shadow-md shadow-blue-500/20 flex items-center gap-1.5"
+            >
+              <Navigation className="w-3.5 h-3.5" /> Open Google Maps
+            </a>
+          </div>
         </div>
 
-        {/* Dynamic Map Graphic */}
-        <div className="w-full h-64 bg-slate-900 rounded-2xl relative overflow-hidden flex items-center justify-center p-6 border border-slate-800">
-          <div className="absolute inset-0 bg-[radial-gradient(#1e293b_1px,transparent_1px)] [background-size:16px_16px] opacity-40" />
+        {/* Dynamic Route Map Simulation Canvas */}
+        <div className="w-full h-72 bg-gradient-to-br from-slate-900 via-slate-950 to-slate-900 rounded-2xl relative overflow-hidden flex items-center justify-center p-6 border border-slate-800 shadow-inner">
+          <div className="absolute inset-0 bg-[radial-gradient(#334155_1px,transparent_1px)] [background-size:20px_20px] opacity-40" />
 
           {/* Route path graphic */}
-          <svg className="absolute inset-0 w-full h-full stroke-cyan-500/40" strokeWidth="4" fill="none">
-            <path d="M 50 200 Q 250 50 450 180 T 850 100" strokeDasharray="6,6" className="animate-pulse" />
+          <svg className="absolute inset-0 w-full h-full stroke-cyan-400" strokeWidth="4" fill="none">
+            <path d="M 80 220 C 220 220, 260 90, 480 140 C 650 180, 720 80, 880 70" strokeDasharray="8,6" className="animate-pulse opacity-80" />
           </svg>
 
           {/* Patient start node */}
-          <div className="absolute left-6 sm:left-12 bottom-12 p-3 bg-blue-600 text-white rounded-2xl shadow-lg flex items-center gap-2 text-xs font-bold max-w-xs truncate">
-            <MapPin className="w-4 h-4 shrink-0" />
-            <span className="truncate">{locationState?.name || 'Patient Origin'}</span>
+          <div className="absolute left-6 sm:left-12 bottom-8 p-3.5 bg-blue-600/90 backdrop-blur-md text-white rounded-2xl shadow-xl flex items-center gap-2.5 text-xs font-bold max-w-xs border border-blue-400/30">
+            <div className="w-3 h-3 rounded-full bg-cyan-300 animate-ping shrink-0" />
+            <div className="truncate">
+              <span className="text-[10px] uppercase font-mono block opacity-80">Origin (Your Location)</span>
+              <span className="truncate">{locationState?.name || 'Patient Origin'}</span>
+            </div>
+          </div>
+
+          {/* Waypoint info pill in middle */}
+          <div className="hidden md:flex absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 px-4 py-2 bg-slate-800/90 border border-slate-700/80 rounded-2xl backdrop-blur-md text-slate-200 text-xs font-semibold items-center gap-2 shadow-2xl">
+            <Car className="w-4 h-4 text-cyan-400" />
+            <span>NH-48 Sira Bypass Corridor • Clear Traffic</span>
           </div>
 
           {/* Hospital destination node */}
-          <div className="absolute right-6 sm:right-12 top-12 p-3 bg-red-600 text-white rounded-2xl shadow-lg flex items-center gap-2 text-xs font-bold">
-            <Navigation className="w-4 h-4 animate-bounce shrink-0" /> Shridevi Hospital OPD
+          <div className="absolute right-6 sm:right-12 top-8 p-3.5 bg-red-600/90 backdrop-blur-md text-white rounded-2xl shadow-xl flex items-center gap-2.5 text-xs font-bold border border-red-400/30">
+            <Navigation className="w-4 h-4 animate-bounce shrink-0 text-white" />
+            <div>
+              <span className="text-[10px] uppercase font-mono block opacity-80">Destination</span>
+              <span>Shridevi Hospital OPD Lounge</span>
+            </div>
+          </div>
+        </div>
+
+        {/* Turn-by-Turn Quick Instructions */}
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs pt-2">
+          <div className="p-3 bg-slate-50 dark:bg-slate-900/60 rounded-xl border border-slate-200 dark:border-slate-800 flex items-center gap-2.5">
+            <span className="w-6 h-6 rounded-full bg-blue-100 dark:bg-blue-900/50 text-blue-600 font-black flex items-center justify-center shrink-0">1</span>
+            <span className="text-slate-700 dark:text-slate-300">Depart origin along NH-48 / Tumakuru Ring Road</span>
+          </div>
+          <div className="p-3 bg-slate-50 dark:bg-slate-900/60 rounded-xl border border-slate-200 dark:border-slate-800 flex items-center gap-2.5">
+            <span className="w-6 h-6 rounded-full bg-blue-100 dark:bg-blue-900/50 text-blue-600 font-black flex items-center justify-center shrink-0">2</span>
+            <span className="text-slate-700 dark:text-slate-300">Turn towards SIET Medical College & Hospital Gate 2</span>
+          </div>
+          <div className="p-3 bg-slate-50 dark:bg-slate-900/60 rounded-xl border border-slate-200 dark:border-slate-800 flex items-center gap-2.5">
+            <span className="w-6 h-6 rounded-full bg-emerald-100 dark:bg-emerald-900/50 text-emerald-600 font-black flex items-center justify-center shrink-0">3</span>
+            <span className="text-slate-700 dark:text-slate-300">Proceed directly to OPD Lounge (Block B, 2nd Floor)</span>
           </div>
         </div>
       </div>

@@ -85,6 +85,7 @@ class Appointment(SQLModel, table=True):
     booked_time: datetime
     status: str = "pending"
     queue_position: Optional[int] = None
+    departure_notified: bool = Field(default=False)
 
 
 class QueueLog(SQLModel, table=True):

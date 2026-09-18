@@ -12,7 +12,7 @@ export const Sidebar = () => {
   const menuItems = [
     { path: '/dashboard', label: 'Overview', icon: LayoutDashboard },
     { path: '/queue-status', label: 'Live Queue Status', icon: Clock },
-    { path: '/arrival-prediction', label: 'Leave Now AI', icon: Navigation },
+    { path: '/arrival-prediction', label: 'My Appointment', icon: Navigation },
     { path: '/appointment', label: 'Book Appointment', icon: Ticket },
     { path: '/notifications', label: 'Notifications', icon: Bell },
     { path: '/profile', label: 'My Profile', icon: User },

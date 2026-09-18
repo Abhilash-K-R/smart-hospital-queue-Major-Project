@@ -53,6 +53,25 @@ const Queue = () => {
     }
   };
 
+  const handleClearToday = async () => {
+    if (!window.confirm("Are you sure you want to clear all active queues and start a fresh day? This will complete all pending appointments.")) {
+      return;
+    }
+    setLoading(true);
+    
+    try {
+      const res = await api.post('/staff/queue/clear-day');
+      setActionMessage(res.data.message || 'Fresh day initialized. Queue is now clean.');
+      await fetchQueue();
+      setTimeout(() => setActionMessage(''), 4000);
+    } catch (err) {
+      console.error('Error clearing queue:', err);
+      setActionMessage('Failed to reset queue for the day');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const updateStatus = async (id, action) => {
     setUpdatingId(`${id}-${action}`);
     try {
@@ -157,6 +176,15 @@ const Queue = () => {
           >
             <PhoneForwarded className="h-4 w-4" />
             {isCallingNext ? 'Calling...' : 'Call Next'}
+          </button>
+
+          <button
+            onClick={handleClearToday}
+            className="flex items-center gap-1.5 px-3 py-2 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 rounded-lg text-xs font-bold transition-colors shadow-sm"
+            title="Clear all active queues to start a fresh day"
+          >
+            <Trash2 className="h-3.5 w-3.5" />
+            Clear Today (Fresh Day)
           </button>
 
           <button

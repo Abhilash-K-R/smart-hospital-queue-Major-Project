@@ -4,12 +4,12 @@ import { TopBar } from '../components/TopBar';
 import { ProgressCard } from '../components/ProgressCard';
 import { StatusBadge } from '../components/StatusBadge';
 import { Button } from '../components/Button';
-import { Clock, RefreshCw, Volume2, Users, AlertCircle, CheckCircle2, Ticket, Play } from 'lucide-react';
+import { Clock, RefreshCw, Volume2, Users, AlertCircle, CheckCircle2, Ticket } from 'lucide-react';
 import { motion } from 'framer-motion';
 
-// Shows detailed queue progress and exposes refresh, announcement, and advance controls.
+// Shows detailed queue progress and exposes refresh and announcement controls.
 export const QueueStatus = () => {
-  const { queueState, toggleAutoRefresh, advanceQueue } = useQueue();
+  const { queueState, toggleAutoRefresh } = useQueue();
   const [countdown, setCountdown] = useState(30);
   const [announcement, setAnnouncement] = useState(null);
 
@@ -77,10 +77,6 @@ export const QueueStatus = () => {
 
           <Button size="sm" variant={queueState.isAutoRefresh ? 'secondary' : 'primary'} onClick={toggleAutoRefresh}>
             {queueState.isAutoRefresh ? 'Pause Sync' : 'Resume 30s Sync'}
-          </Button>
-
-          <Button size="sm" icon={Play} onClick={advanceQueue} title="Simulate next patient called">
-            Advance Queue
           </Button>
         </div>
       </div>
