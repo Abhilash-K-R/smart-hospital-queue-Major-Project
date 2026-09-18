@@ -28,7 +28,7 @@ export const PINCODE_DATABASE = {
   "572130": { name: "Kunigal Town & National Highway", lat: 13.0238, lng: 77.0345, district: "Tumakuru", tag: "Kunigal" },
   "572201": { name: "Tiptur Town (Kalpataru City)", lat: 13.2555, lng: 76.4784, district: "Tumakuru", tag: "Tiptur" },
   "572138": { name: "Madhugiri Monolith Area", lat: 13.6631, lng: 77.2089, district: "Tumakuru", tag: "Madhugiri" },
-  "572129": { name: "Koratagere Town", lat: 13.5222, lng: 77.2369, district: "Tumakuru", tag: "Koratagere" },
+  "572129": { name: "Koratagere Town & Taluk", lat: 13.5233, lng: 77.2378, district: "Tumakuru", tag: "Koratagere" },
   "572220": { name: "Turuvekere Town", lat: 13.1611, lng: 76.6681, district: "Tumakuru", tag: "Turuvekere" },
   "572128": { name: "Pavagada Taluk", lat: 14.1011, lng: 77.2789, district: "Tumakuru", tag: "Pavagada" },
   "572214": { name: "Chikkanayakanahalli", lat: 13.4192, lng: 76.6214, district: "Tumakuru", tag: "C.N. Halli" },
@@ -43,13 +43,11 @@ export const PINCODE_DATABASE = {
 
 // Popular 1-Click Presets for Quick Patient Selection
 export const LOCATION_PRESETS = [
-  { id: 'tumakuru_city', label: 'Tumakuru Town', pin: '572101', detail: 'Central Town (12 mins)', ...PINCODE_DATABASE['572101'] },
-  { id: 'sira_town', label: 'Sira Town', pin: '572137', detail: 'Sira Taluk (45 mins)', ...PINCODE_DATABASE['572137'] },
+  { id: 'tumakuru_city', label: 'Tumakuru City Center', pin: '572101', detail: 'Central Town (12 mins)', ...PINCODE_DATABASE['572101'] },
+  { id: 'sira_town', label: 'Sira', pin: '572137', detail: 'Sira Taluk (45 mins)', ...PINCODE_DATABASE['572137'] },
   { id: 'gubbi_town', label: 'Gubbi', pin: '572216', detail: 'Gubbi Rural (25 mins)', ...PINCODE_DATABASE['572216'] },
-  { id: 'kunigal_town', label: 'Kunigal', pin: '572130', detail: 'Kunigal Highway (40 mins)', ...PINCODE_DATABASE['572130'] },
-  { id: 'tiptur_town', label: 'Tiptur', pin: '572201', detail: 'Tiptur Taluk (75 mins)', ...PINCODE_DATABASE['572201'] },
-  { id: 'bengaluru_peenya', label: 'Bengaluru (Peenya)', pin: '560057', detail: 'Metro Junction (60 mins)', ...PINCODE_DATABASE['560057'] },
-  { id: 'bengaluru_majestic', label: 'Bengaluru (Majestic)', pin: '560023', detail: 'City Center (85 mins)', ...PINCODE_DATABASE['560023'] }
+  { id: 'koratagere_town', label: 'Koratagere', pin: '572129', detail: 'Koratagere Taluk (35 mins)', ...PINCODE_DATABASE['572129'] },
+  { id: 'bengaluru_majestic', label: 'Bengaluru Majestic', pin: '560023', detail: 'City Center (85 mins)', ...PINCODE_DATABASE['560023'] }
 ];
 
 /**

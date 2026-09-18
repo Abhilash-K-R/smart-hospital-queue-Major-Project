@@ -4,6 +4,7 @@ import { useAuth } from '../context/AuthContext';
 import { queueService } from '../services/queueService';
 import { notificationService } from '../services/notificationService';
 import { useLocationResolver } from '../hooks/useLocationResolver';
+import { LOCATION_PRESETS, resolvePincode } from '../utils/locationResolver';
 import { TopBar } from '../components/TopBar';
 import { Button } from '../components/Button';
 import MobileDispatchModal from '../components/MobileDispatchModal';
@@ -27,7 +28,11 @@ import {
   Send,
   Compass,
   Users,
-  Edit3
+  Edit3,
+  Search,
+  Check,
+  Sparkles,
+  Ticket
 } from 'lucide-react';
 import { motion } from 'framer-motion';
 
@@ -46,7 +51,8 @@ export const ArrivalPrediction = () => {
     label: locationLabel,
     isLocating,
     setLiveGPSMode,
-    setManualLocationByPincode
+    setManualLocationByPincode,
+    refreshGPS
   } = useLocationResolver();
 
   const [isLocationModalOpen, setIsLocationModalOpen] = useState(false);
@@ -54,6 +60,10 @@ export const ArrivalPrediction = () => {
   const [secondsLeft, setSecondsLeft] = useState(600);
   const [isDeparted, setIsDeparted] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
+
+  // In-card Pincode & Beneficiary State for Family Mode
+  const [customPincode, setCustomPincode] = useState(locationState?.pincode || '');
+  const [beneficiaryInput, setBeneficiaryInput] = useState(locationState?.beneficiaryName || '');
 
   // Mobile dispatch simulator state
   const [isDispatchModalOpen, setIsDispatchModalOpen] = useState(false);
@@ -104,6 +114,27 @@ export const ArrivalPrediction = () => {
   };
 
   const shouldLeaveNow = departureData?.should_leave_now || (secondsLeft <= 0 && !isDeparted);
+
+  // Handle Preset Click in Family Mode
+  const handlePresetSelect = (preset) => {
+    setCustomPincode(preset.pin);
+    setManualLocationByPincode(preset.pin, {
+      isFamilyBooking: true,
+      beneficiaryName: beneficiaryInput.trim() || 'Family Relative'
+    });
+  };
+
+  // Handle manual 6-digit Pincode input
+  const handlePincodeChange = (e) => {
+    const val = e.target.value.replace(/\D/g, '').slice(0, 6);
+    setCustomPincode(val);
+    if (val.length === 6) {
+      setManualLocationByPincode(val, {
+        isFamilyBooking: true,
+        beneficiaryName: beneficiaryInput.trim() || 'Family Relative'
+      });
+    }
+  };
 
   // Prepare and open Dual WhatsApp & SMS Dispatch Modal
   const handleOpenDispatchSimulator = async () => {
@@ -211,44 +242,172 @@ export const ArrivalPrediction = () => {
         </div>
       </div>
 
-      {/* Dual-Mode Location Origin Indicator Card */}
-      <div className="p-4 sm:p-5 rounded-2xl bg-gradient-to-r from-blue-500/10 via-indigo-500/10 to-teal-500/10 border border-blue-500/20 backdrop-blur-sm flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-        <div className="flex items-center gap-3.5">
-          <div className={`p-3 rounded-2xl shrink-0 ${
-            isGPS 
-              ? 'bg-blue-600 text-white shadow-lg shadow-blue-500/20' 
-              : 'bg-purple-600 text-white shadow-lg shadow-purple-500/20'
-          }`}>
-            {isGPS ? <Navigation className="w-5 h-5 animate-pulse" /> : <Users className="w-5 h-5" />}
-          </div>
-          <div className="space-y-0.5">
+      {/* Dual-Mode Location Engine Card (Mode A: Live GPS vs Mode B: Family / Remote Patient Mode) */}
+      <div className="glass-card rounded-3xl p-6 sm:p-7 space-y-5 border border-slate-200 dark:border-slate-800 bg-white/80 dark:bg-slate-900/80 backdrop-blur-xl shadow-lg">
+        
+        {/* Segmented Mode Toggle Header */}
+        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 border-b border-slate-100 dark:border-slate-800/80 pb-4">
+          <div>
             <div className="flex items-center gap-2">
-              <span className="text-[10px] font-bold uppercase tracking-widest px-2 py-0.5 rounded-full bg-blue-100 dark:bg-blue-900/60 text-blue-800 dark:text-blue-200">
-                {isGPS ? 'Mode A: Live GPS' : 'Mode B: Family / Remote'}
-              </span>
-              {isFamilyBooking && (
-                <span className="text-[10px] font-bold uppercase tracking-widest px-2 py-0.5 rounded-full bg-purple-100 dark:bg-purple-900/60 text-purple-800 dark:text-purple-200">
-                  Beneficiary: {locationState.beneficiaryName || 'Family Member'}
-                </span>
-              )}
+              <Compass className="w-5 h-5 text-blue-600 dark:text-blue-400" />
+              <h3 className="text-base font-black text-slate-900 dark:text-white">
+                Dual-Mode Patient Location Engine
+              </h3>
             </div>
-            <p className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-1.5">
-              <MapPin className="w-3.5 h-3.5 text-blue-500" />
-              <span>Origin: {locationState?.name || locationLabel}</span>
+            <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+              Select your departure starting point for accurate travel & zero-wait departure calculation
             </p>
-            <p className="text-xs text-slate-500 dark:text-slate-400">
-              Coordinates: {coords.lat}, {coords.lng} • Route to Shridevi Hospital (Sira Road)
-            </p>
+          </div>
+
+          {/* Mode Switcher Tabs */}
+          <div className="flex p-1 bg-slate-100 dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 w-full sm:w-auto">
+            <button
+              onClick={() => setLiveGPSMode()}
+              className={`flex-1 sm:flex-none flex items-center justify-center gap-2 py-2 px-4 rounded-xl text-xs font-bold transition-all ${
+                isGPS
+                  ? 'bg-blue-600 text-white shadow-md shadow-blue-500/25'
+                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+              }`}
+            >
+              <Navigation className={`w-3.5 h-3.5 ${isGPS && isLocating ? 'animate-spin' : ''}`} />
+              Mode A: My Live GPS
+            </button>
+            
+            <button
+              onClick={() => {
+                if (isGPS) {
+                  setManualLocationByPincode(customPincode || '572101', {
+                    isFamilyBooking: true,
+                    beneficiaryName: beneficiaryInput.trim() || 'Family Member'
+                  });
+                }
+              }}
+              className={`flex-1 sm:flex-none flex items-center justify-center gap-2 py-2 px-4 rounded-xl text-xs font-bold transition-all ${
+                !isGPS
+                  ? 'bg-purple-600 text-white shadow-md shadow-purple-500/25'
+                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+              }`}
+            >
+              <Users className="w-3.5 h-3.5" />
+              Mode B: Family / Remote Mode
+            </button>
           </div>
         </div>
 
-        <button
-          onClick={() => setIsLocationModalOpen(true)}
-          className="px-4 py-2 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs font-bold text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-slate-700 rounded-xl transition-all shadow-sm flex items-center gap-1.5 shrink-0"
-        >
-          <Edit3 className="w-3.5 h-3.5" />
-          Change Origin Location
-        </button>
+        {/* Mode-Specific Controls */}
+        {isGPS ? (
+          /* Mode A: Live GPS Content */
+          <div className="p-4 rounded-2xl bg-blue-50/60 dark:bg-blue-950/30 border border-blue-200/60 dark:border-blue-800/60 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-xs">
+            <div className="flex items-center gap-3">
+              <div className="w-9 h-9 rounded-xl bg-blue-600 text-white flex items-center justify-center shrink-0 shadow-md shadow-blue-500/20">
+                <Navigation className="w-4 h-4 animate-pulse" />
+              </div>
+              <div>
+                <p className="font-bold text-slate-900 dark:text-white flex items-center gap-1.5">
+                  <span>Live Satellite Geolocation Active</span>
+                  <span className="w-2 h-2 rounded-full bg-emerald-500 animate-ping" />
+                </p>
+                <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                  Auto-resolving real-time device coordinates to Shridevi Hospital (Sira Road).
+                </p>
+              </div>
+            </div>
+
+            <button
+              onClick={refreshGPS}
+              disabled={isLocating}
+              className="px-3.5 py-1.5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-blue-600 dark:text-blue-400 font-bold hover:bg-blue-50 dark:hover:bg-slate-700 transition-all shadow-sm flex items-center gap-1.5 shrink-0"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${isLocating ? 'animate-spin' : ''}`} />
+              {isLocating ? 'Acquiring GPS...' : 'Refresh GPS'}
+            </button>
+          </div>
+        ) : (
+          /* Mode B: Family / Remote Patient Locality & Presets Content */
+          <div className="space-y-4 pt-1">
+            <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
+              {/* 6-Digit Pincode Input */}
+              <div className="relative flex-1">
+                <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+                <input
+                  type="text"
+                  maxLength={6}
+                  value={customPincode}
+                  onChange={handlePincodeChange}
+                  placeholder="Enter 6-digit Karnataka PIN (e.g., 572137, 572216)..."
+                  className="w-full pl-10 pr-4 py-2.5 bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 rounded-2xl text-xs font-semibold text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-purple-500 transition-all"
+                />
+              </div>
+
+              {/* Beneficiary Name Input */}
+              <div className="relative sm:w-64">
+                <Users className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+                <input
+                  type="text"
+                  value={beneficiaryInput}
+                  onChange={(e) => {
+                    setBeneficiaryInput(e.target.value);
+                    if (locationState.pincode) {
+                      setManualLocationByPincode(locationState.pincode, {
+                        isFamilyBooking: true,
+                        beneficiaryName: e.target.value
+                      });
+                    }
+                  }}
+                  placeholder="Beneficiary (e.g. Father, Relative)..."
+                  className="w-full pl-10 pr-4 py-2.5 bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 rounded-2xl text-xs font-semibold text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-purple-500 transition-all"
+                />
+              </div>
+            </div>
+
+            {/* Quick 1-Click Karnataka Presets */}
+            <div className="space-y-1.5">
+              <span className="text-[10px] uppercase font-bold text-slate-400 tracking-wider">
+                Quick Regional Locality Presets
+              </span>
+              <div className="flex flex-wrap gap-2">
+                {LOCATION_PRESETS.map((preset) => {
+                  const isSelected = !isGPS && locationState?.pincode === preset.pin;
+                  return (
+                    <button
+                      key={preset.id}
+                      onClick={() => handlePresetSelect(preset)}
+                      className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 border shadow-sm ${
+                        isSelected
+                          ? 'bg-purple-600 text-white border-purple-600 shadow-purple-500/20 scale-[1.02]'
+                          : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700'
+                      }`}
+                    >
+                      <span>{preset.label}</span>
+                      <span className={`text-[10px] px-1.5 py-0.5 rounded-md ${
+                        isSelected ? 'bg-purple-700 text-purple-100' : 'bg-slate-100 dark:bg-slate-700 text-slate-500'
+                      }`}>
+                        {preset.pin}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Dynamic Journey Origin Status Banner */}
+        <div className="p-3.5 rounded-2xl bg-gradient-to-r from-blue-500/10 via-indigo-500/10 to-teal-500/10 border border-blue-500/20 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 text-xs">
+          <div className="flex items-center gap-2">
+            <MapPin className="w-4 h-4 text-blue-600 dark:text-blue-400 shrink-0" />
+            <span className="font-bold text-slate-900 dark:text-white">
+              📍 Origin: {locationState?.name || locationLabel} {locationState?.pincode ? `(${locationState.pincode})` : ''} — Patient Journey
+            </span>
+          </div>
+          <div className="flex items-center gap-2 text-[11px] text-slate-500 dark:text-slate-400">
+            <span className="font-mono bg-white/80 dark:bg-slate-800/80 px-2 py-0.5 rounded-md border border-slate-200 dark:border-slate-700">
+              {coords.lat}, {coords.lng}
+            </span>
+            <span>➔ Shridevi Hospital</span>
+          </div>
+        </div>
+
       </div>
 
       {/* Main AI Departure Feature Hero Card */}

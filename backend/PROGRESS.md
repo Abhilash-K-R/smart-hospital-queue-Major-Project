@@ -310,4 +310,17 @@ Dual mobile notification dispatch engine operational and validated.
 ### 4. Patient App & Staff Dashboard Experience Refinements
 - **Passive Leave Now Hero Banner:** Streamlined `patient-app/src/pages/ArrivalPrediction.jsx` to be purely informational with real-time status pills.
 - **Dynamic Live Queue Continuity:** Verified that completing anterior appointments in `staff-dashboard` dynamically decreases `predicted_wait_minutes` in real-time.
-- **Live Verification:** Created and executed `test_live_sms.py` and `test_live_wait_decrease.py` validating 100% end-to-end functionality.
+- **Live Verification:** Created and executed `test_live_sms.py` and `test_live_wait_decrease.py` validating 100% end-to-end functionality.
+
+## Phase 10 — Dual-Mode Location Engine & Regional Geocoding (19 September 2026)
+**Branch:** dev-abhi  
+**Release Tag:** v0.7.2  
+**Owner:** Abhilash KR  
+
+### 1. Dual-Mode Patient Location Resolution
+- **Mode A (Live GPS):** Direct browser/device satellite resolution with real-time ping indicator and refresh capability.
+- **Mode B (Family / Remote Booking):** Dedicated mode for booking on behalf of parents or relatives departing from another locality.
+- **Karnataka Regional Presets:** 1-click quick selection chips for Tumakuru City Center (`572101`), Sira (`572137`), Gubbi (`572216`), Koratagere (`572129`), and Bengaluru Majestic (`560023`).
+- **6-Digit Pincode Geocoding:** Offline Karnataka postal pincode resolver with fallback to Tumakuru District Center for unmapped areas.
+- **Dynamic Sync:** Switching location modes or presets immediately triggers `POST /departure-check` to recalculate transit times and leave-now advisories.
+
