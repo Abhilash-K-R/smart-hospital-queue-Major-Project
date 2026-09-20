@@ -21,6 +21,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlmodel import Session, select, text
 from dotenv import load_dotenv
 import os
+import requests
 
 from travel_time import get_travel_time_minutes
 from models import Patient, Department, Doctor, SymptomMapping, Appointment, StaffUser, QueueLog
@@ -288,6 +289,128 @@ def get_my_appointments(current_user: dict = Depends(get_current_user)):
             select(Appointment).where(Appointment.patient_id == patient_id)
         ).all()
         return appointments
+
+
+@app.post("/appointments/{token_or_id}/cancel")
+def cancel_appointment(token_or_id: str):
+    """
+    Cancels an appointment by ID (e.g. '12') or Token Number (e.g. 'OPD-012').
+    Sets status = 'cancelled' and removes from active queue (queue_position = None).
+    """
+    clean_id_str = token_or_id.upper().replace("OPD-", "").strip()
+    try:
+        appt_id = int(clean_id_str)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid appointment ID or token format")
+
+    with Session(engine) as session:
+        appointment = session.get(Appointment, appt_id)
+        if not appointment:
+            raise HTTPException(status_code=404, detail="Appointment not found")
+
+        appointment.status = "cancelled"
+        appointment.queue_position = None
+        session.add(appointment)
+        session.commit()
+        session.refresh(appointment)
+
+        return {
+            "success": True,
+            "message": "Appointment cancelled successfully",
+            "appointment_id": appointment.id,
+            "status": "cancelled"
+        }
+
+
+@app.get("/geocode")
+def geocode_location(query: str):
+    """
+    Geocodes a pincode, locality name, or landmark using OpenRouteService Pelias Geocoder.
+    Returns latitude, longitude, label, and resolved metadata with fallback support.
+    """
+    clean_query = query.strip()
+    if not clean_query:
+        raise HTTPException(status_code=400, detail="Query parameter is required")
+
+    api_key = os.getenv("OPENROUTESERVICE_API_KEY")
+    if api_key:
+        search_text = f"{clean_query} Karnataka, India" if clean_query.isdigit() and len(clean_query) == 6 else f"{clean_query}, India"
+        url = "https://api.openrouteservice.org/geocode/search"
+        params = {
+            "api_key": api_key,
+            "text": search_text,
+            "boundary.country": "IND"
+        }
+        try:
+            resp = requests.get(url, params=params, timeout=8)
+            if resp.status_code == 200:
+                features = resp.json().get("features", [])
+                if features:
+                    f = features[0]
+                    coords = f.get("geometry", {}).get("coordinates", [])
+                    props = f.get("properties", {})
+                    if len(coords) >= 2:
+                        lng, lat = coords[0], coords[1]
+                        label = props.get("label") or props.get("name") or clean_query
+                        district = props.get("county") or props.get("region") or "Karnataka"
+                        return {
+                            "success": True,
+                            "query": clean_query,
+                            "lat": lat,
+                            "lng": lng,
+                            "name": label,
+                            "district": district,
+                            "isEstimated": False,
+                            "source": "openrouteservice"
+                        }
+        except Exception as e:
+            print(f"[Geocode] ORS geocode error: {e}")
+
+    # Fallback to Karnataka regional centroids
+    if clean_query.startswith("572"):
+        return {
+            "success": True,
+            "query": clean_query,
+            "lat": 13.3409,
+            "lng": 77.1010,
+            "name": f"Tumakuru District ({clean_query})",
+            "district": "Tumakuru",
+            "isEstimated": True,
+            "source": "regional_fallback"
+        }
+    elif clean_query.startswith("560") or clean_query.startswith("562"):
+        return {
+            "success": True,
+            "query": clean_query,
+            "lat": 13.0285,
+            "lng": 77.5197,
+            "name": f"Bengaluru Region ({clean_query})",
+            "district": "Bengaluru",
+            "isEstimated": True,
+            "source": "regional_fallback"
+        }
+    elif clean_query.startswith("577"):
+        return {
+            "success": True,
+            "query": clean_query,
+            "lat": 14.2285,
+            "lng": 76.3992,
+            "name": f"Central Karnataka Region ({clean_query})",
+            "district": "Chitradurga",
+            "isEstimated": True,
+            "source": "regional_fallback"
+        }
+
+    return {
+        "success": True,
+        "query": clean_query,
+        "lat": 13.340881,
+        "lng": 77.100601,
+        "name": f"Location ({clean_query})",
+        "district": "Tumakuru",
+        "isEstimated": True,
+        "source": "default_fallback"
+    }
     
 
 

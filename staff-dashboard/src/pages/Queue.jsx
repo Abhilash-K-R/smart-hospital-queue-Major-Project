@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Search, Filter, MoreVertical, Check, UserMinus, PhoneForwarded, RefreshCw, AlertCircle, MessageSquare, Send, Smartphone } from 'lucide-react';
+import { Search, Filter, MoreVertical, Check, UserMinus, PhoneForwarded, RefreshCw, AlertCircle, MessageSquare, Send, Smartphone, Trash2 } from 'lucide-react';
 import api from '../services/api';
 
 const getTriageColor = (level) => {

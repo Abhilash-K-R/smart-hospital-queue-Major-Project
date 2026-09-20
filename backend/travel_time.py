@@ -1,111 +1,146 @@
 """
 travel_time.py
 -------------
-Provides travel-time estimation from a patient's location to the hospital.
+Provides live travel-time and road distance estimation from a patient's
+location to Shridevi Hospital & Research Hospital, Tumakuru.
 
-Currently uses a MOCK function (get_mock_travel_time) since we haven't
-enabled Google Cloud billing yet — no reason to activate a paid API
-before the rest of the system is ready to actually use it.
+Primary Engine: OpenRouteService (ORS) Directions API (v2/directions/driving-car)
+Fallback Engine: Haversine distance formula with speed/traffic modeling for offline resilience.
 
-WHEN READY TO GO LIVE:
-  1. Enable billing on Google Cloud, get a restricted API key
-  2. Add GOOGLE_MAPS_API_KEY to .env
-  3. Switch the single line in get_travel_time_minutes() from
-     get_mock_travel_time(...) to get_real_travel_time(...)
-  Nothing else in the codebase needs to change — every other file
-  calls get_travel_time_minutes(), never the mock/real functions directly.
+Hospital Coordinates:
+  Latitude: 13.376230
+  Longitude: 77.097439 (Sira Road, Tumakuru - 572106)
 
-Owner: Abhilash (Phase 4)
+Owner: Abhilash (Phase 4 / Section IV IEEE Architecture)
 """
 
 import os
-import random
 import math
+import requests
 from dotenv import load_dotenv
 
 load_dotenv()
 
+OPENROUTESERVICE_API_KEY = os.getenv("OPENROUTESERVICE_API_KEY")
 GOOGLE_MAPS_API_KEY = os.getenv("GOOGLE_MAPS_API_KEY")
+
+HOSPITAL_LAT = 13.376230
+HOSPITAL_LNG = 77.097439
+
+
+def calculate_haversine_distance(lat1: float, lng1: float, lat2: float, lng2: float) -> float:
+    """
+    Calculates great-circle distance in kilometers between two lat/lng coordinates.
+    """
+    R = 6371.0  # Earth's radius in kilometers
+    phi1, phi2 = math.radians(lat1), math.radians(lat2)
+    dphi = math.radians(lat2 - lat1)
+    dlambda = math.radians(lng2 - lng1)
+
+    a = math.sin(dphi / 2.0) ** 2 + math.cos(phi1) * math.cos(phi2) * math.sin(dlambda / 2.0) ** 2
+    c = 2.0 * math.atan2(math.sqrt(a), math.sqrt(1.0 - a))
+    return R * c
 
 
 def get_mock_travel_time(
     patient_lat: float,
     patient_lng: float,
-    hospital_lat: float,
-    hospital_lng: float,
+    hospital_lat: float = HOSPITAL_LAT,
+    hospital_lng: float = HOSPITAL_LNG,
 ) -> int:
     """
-    Fake but reasonably realistic travel time, based on straight-line
-    distance between two coordinates (not real road distance, but good
-    enough to test our notification LOGIC before the real API is live).
-
-    Uses the Haversine formula — standard way to calculate distance
-    between two lat/lng points on Earth's curved surface.
+    Haversine fallback travel time (in minutes) based on straight-line distance.
+    Assumes average urban/rural corridor speed of ~28 km/h.
     """
-    R = 6371  # Earth's radius in kilometers
+    distance_km = calculate_haversine_distance(patient_lat, patient_lng, hospital_lat, hospital_lng)
+    
+    # Speed tiers: near campus vs district highway
+    if distance_km <= 1.0:
+        base_minutes = (distance_km / 15.0) * 60.0  # ~2-4 mins campus approach
+    elif distance_km <= 15.0:
+        base_minutes = (distance_km / 25.0) * 60.0  # city traffic
+    else:
+        base_minutes = (distance_km / 45.0) * 60.0  # national highway corridor
 
-    lat1, lng1 = math.radians(patient_lat), math.radians(patient_lng)
-    lat2, lng2 = math.radians(hospital_lat), math.radians(hospital_lng)
-
-    dlat = lat2 - lat1
-    dlng = lng2 - lng1
-
-    a = math.sin(dlat / 2) ** 2 + math.cos(lat1) * math.cos(lat2) * math.sin(dlng / 2) ** 2
-    c = 2 * math.asin(math.sqrt(a))
-    distance_km = R * c
-
-    # Assume average city driving speed of ~25 km/h (accounts for traffic,
-    # signals, etc. — not highway speed). Add a bit of random variation
-    # so it doesn't feel robotically identical every time.
-    base_minutes = (distance_km / 25) * 60
-    variation = random.uniform(0.9, 1.2)
-
-    return max(round(base_minutes * variation), 3)  # minimum 3 min, avoids 0/negative
+    return max(round(base_minutes), 2)
 
 
-def get_real_travel_time(
+def get_ors_travel_details(
     patient_lat: float,
     patient_lng: float,
-    hospital_lat: float,
-    hospital_lng: float,
-) -> int:
+    hospital_lat: float = HOSPITAL_LAT,
+    hospital_lng: float = HOSPITAL_LNG,
+) -> dict:
     """
-    REAL Google Maps Distance Matrix API call — not active yet.
-    Requires GOOGLE_MAPS_API_KEY to be set in .env and billing enabled
-    on the Google Cloud project.
-
-    Left here fully written so activating it later is a one-line swap
-    in get_travel_time_minutes(), not a rewrite.
+    Calls OpenRouteService v2 Driving Directions to get exact road distance and duration.
+    Falls back gracefully to Haversine on timeout, network error, or invalid response.
     """
-    import requests
+    api_key = os.getenv("OPENROUTESERVICE_API_KEY")
+    if not api_key:
+        print("[TravelTime] OPENROUTESERVICE_API_KEY not found. Using Haversine fallback.")
+        fallback_mins = get_mock_travel_time(patient_lat, patient_lng, hospital_lat, hospital_lng)
+        fallback_km = round(calculate_haversine_distance(patient_lat, patient_lng, hospital_lat, hospital_lng), 2)
+        return {
+            "success": True,
+            "duration_minutes": fallback_mins,
+            "distance_km": fallback_km,
+            "source": "haversine_fallback"
+        }
 
-    url = "https://maps.googleapis.com/maps/api/distancematrix/json"
+    url = "https://api.openrouteservice.org/v2/directions/driving-car"
+    headers = {
+        "Authorization": api_key,
+        "Accept": "application/json, application/geo+json"
+    }
+    # Note: OpenRouteService standard expects longitude first (lng, lat)
     params = {
-        "origins": f"{patient_lat},{patient_lng}",
-        "destinations": f"{hospital_lat},{hospital_lng}",
-        "key": GOOGLE_MAPS_API_KEY,
-        "departure_time": "now",  # accounts for LIVE traffic conditions
+        "start": f"{patient_lng},{patient_lat}",
+        "end": f"{hospital_lng},{hospital_lat}"
     }
 
-    response = requests.get(url, params=params)
-    data = response.json()
+    try:
+        response = requests.get(url, params=params, headers=headers, timeout=8)
+        if response.status_code == 200:
+            data = response.json()
+            features = data.get("features", [])
+            if features:
+                summary = features[0].get("properties", {}).get("summary", {})
+                distance_meters = summary.get("distance", 0.0)
+                duration_seconds = summary.get("duration", 0.0)
 
-    duration_seconds = data["rows"][0]["elements"][0]["duration_in_traffic"]["value"]
-    return round(duration_seconds / 60)
+                distance_km = round(distance_meters / 1000.0, 2)
+                duration_minutes = max(round(duration_seconds / 60.0, 1), 2.0)
+
+                return {
+                    "success": True,
+                    "duration_minutes": duration_minutes,
+                    "distance_km": distance_km,
+                    "source": "openrouteservice"
+                }
+
+        print(f"[TravelTime] ORS returned status {response.status_code}: {response.text[:200]}. Using Haversine.")
+    except Exception as e:
+        print(f"[TravelTime] ORS request failed: {e}. Using Haversine.")
+
+    fallback_mins = get_mock_travel_time(patient_lat, patient_lng, hospital_lat, hospital_lng)
+    fallback_km = round(calculate_haversine_distance(patient_lat, patient_lng, hospital_lat, hospital_lng), 2)
+    return {
+        "success": True,
+        "duration_minutes": fallback_mins,
+        "distance_km": fallback_km,
+        "source": "haversine_fallback"
+    }
 
 
 def get_travel_time_minutes(
     patient_lat: float,
     patient_lng: float,
-    hospital_lat: float,
-    hospital_lng: float,
+    hospital_lat: float = HOSPITAL_LAT,
+    hospital_lng: float = HOSPITAL_LNG,
 ) -> int:
     """
-    Single entry point every other file should call. Internally decides
-    whether to use the mock or real Google API, based on whether a real
-    key is configured.
+    Primary travel duration resolver. Returns integer minutes.
+    Used by departure checks and queue prediction endpoints.
     """
-    if GOOGLE_MAPS_API_KEY:
-        return get_real_travel_time(patient_lat, patient_lng, hospital_lat, hospital_lng)
-    else:
-        return get_mock_travel_time(patient_lat, patient_lng, hospital_lat, hospital_lng)
+    details = get_ors_travel_details(patient_lat, patient_lng, hospital_lat, hospital_lng)
+    return int(round(details.get("duration_minutes", 10.0)))

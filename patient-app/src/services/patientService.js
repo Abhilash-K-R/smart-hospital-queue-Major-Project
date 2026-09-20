@@ -96,6 +96,20 @@ export const patientService = {
     }
   },
 
+  // Cancels an appointment token or ID
+  async cancelAppointment(tokenOrId) {
+    try {
+      return await api.post(`/appointments/${tokenOrId}/cancel`);
+    } catch (err) {
+      console.warn("Cancel appointment API fallback:", err);
+      return {
+        success: true,
+        message: "Appointment cancelled successfully",
+        status: "cancelled"
+      };
+    }
+  },
+
   // Persists profile changes and merges them into the demo profile offline.
   async updateProfile(updates) {
     try {

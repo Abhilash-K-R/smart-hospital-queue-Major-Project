@@ -145,3 +145,43 @@ export const saveLocation = (locationData) => {
     console.warn("Failed to persist location preference:", err);
   }
 };
+
+/**
+ * Calls backend GET /geocode to resolve real coordinates via OpenRouteService Pelias
+ * with local fallback on error or offline mode.
+ */
+export const geocodeLocationQuery = async (query) => {
+  const clean = String(query || "").trim();
+  if (!clean) return resolvePincode("572101");
+
+  // Check known local pincode database first for instant 0ms resolution
+  if (PINCODE_DATABASE[clean]) {
+    return resolvePincode(clean);
+  }
+
+  try {
+    // Import api dynamically or use fetch
+    const backendUrl = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+    const resp = await fetch(`${backendUrl}/geocode?query=${encodeURIComponent(clean)}`);
+    if (resp.ok) {
+      const res = await resp.json();
+      if (res && res.success && res.lat && res.lng) {
+        return {
+          success: true,
+          pincode: clean.length === 6 && /^\d+$/.test(clean) ? clean : "",
+          name: res.name || clean,
+          lat: Number(res.lat),
+          lng: Number(res.lng),
+          district: res.district || "Karnataka",
+          isEstimated: Boolean(res.isEstimated),
+          source: res.source || "openrouteservice"
+        };
+      }
+    }
+  } catch (err) {
+    console.warn("Live /geocode request failed, using regional fallback:", err.message);
+  }
+
+  return resolvePincode(clean);
+};
+
