@@ -20,7 +20,7 @@ export const PINCODE_DATABASE = {
   "572103": { name: "Tumakuru University / Batwadi", lat: 13.3370, lng: 77.1180, district: "Tumakuru", tag: "Tumakuru East" },
   "572104": { name: "Tumakuru Kyatsandra / Siddaganga Math", lat: 13.3150, lng: 77.1520, district: "Tumakuru", tag: "Kyatsandra" },
   "572105": { name: "Tumakuru SIT Extension / Ring Road", lat: 13.3280, lng: 77.1260, district: "Tumakuru", tag: "SIT Campus" },
-  "572106": { name: "Shridevi Campus / SIET / Sira Road", lat: 13.3762, lng: 77.0974, district: "Tumakuru", tag: "Hospital Vicinity" },
+  "572106": { name: "SIET Campus / Sira Road", lat: 13.3792, lng: 77.1004, district: "Tumakuru", tag: "Near Campus" },
 
   // Tumakuru District Taluks
   "572137": { name: "Sira Town & Taluk", lat: 13.7434, lng: 76.9048, district: "Tumakuru", tag: "Sira" },
@@ -41,13 +41,14 @@ export const PINCODE_DATABASE = {
   "562159": { name: "Doddaballapura Town", lat: 13.2929, lng: 77.5413, district: "Bengaluru Rural", tag: "Doddaballapura" }
 };
 
-// Popular 1-Click Presets for Quick Patient Selection
+// Popular 1-Click Presets for Quick Patient Selection & Demonstration Tiers
 export const LOCATION_PRESETS = [
-  { id: 'tumakuru_city', label: 'Tumakuru City Center', pin: '572101', detail: 'Central Town (12 mins)', ...PINCODE_DATABASE['572101'] },
-  { id: 'sira_town', label: 'Sira', pin: '572137', detail: 'Sira Taluk (45 mins)', ...PINCODE_DATABASE['572137'] },
-  { id: 'gubbi_town', label: 'Gubbi', pin: '572216', detail: 'Gubbi Rural (25 mins)', ...PINCODE_DATABASE['572216'] },
-  { id: 'koratagere_town', label: 'Koratagere', pin: '572129', detail: 'Koratagere Taluk (35 mins)', ...PINCODE_DATABASE['572129'] },
-  { id: 'bengaluru_majestic', label: 'Bengaluru Majestic', pin: '560023', detail: 'City Center (85 mins)', ...PINCODE_DATABASE['560023'] }
+  { id: 'siet_campus', label: 'SIET Campus (Near)', pin: '572106', detail: 'Near Campus (~2 mins)', ...PINCODE_DATABASE['572106'] },
+  { id: 'tumakuru_city', label: 'Tumakuru Town (Medium)', pin: '572101', detail: 'Central Town (~12-15 mins)', ...PINCODE_DATABASE['572101'] },
+  { id: 'bengaluru_majestic', label: 'Bengaluru Majestic (Far)', pin: '560023', detail: 'City Center (~85-110 mins)', ...PINCODE_DATABASE['560023'] },
+  { id: 'sira_town', label: 'Sira', pin: '572137', detail: 'Sira Taluk (~45 mins)', ...PINCODE_DATABASE['572137'] },
+  { id: 'gubbi_town', label: 'Gubbi', pin: '572216', detail: 'Gubbi Rural (~25 mins)', ...PINCODE_DATABASE['572216'] },
+  { id: 'koratagere_town', label: 'Koratagere', pin: '572129', detail: 'Koratagere Taluk (~35 mins)', ...PINCODE_DATABASE['572129'] }
 ];
 
 /**
