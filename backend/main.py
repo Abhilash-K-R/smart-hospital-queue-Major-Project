@@ -299,10 +299,16 @@ def send_automated_sms(phone: str, message: str) -> dict:
     """
     Dispatches an automated SMS alert via Fast2SMS Quick SMS gateway.
     Optimized for GSM 7-bit English encoding under 140 characters (1 SMS credit).
+    Guarded by ENABLE_REAL_SMS flag to protect wallet balance in development.
     """
     import re
     import requests
     
+    enable_real_sms = os.getenv("ENABLE_REAL_SMS", "False").strip()
+    if enable_real_sms != "True":
+        print(f"[MOCK SMS] Real SMS disabled to protect balance. Target: {phone} | Message: {message} | Status: Simulated 200 OK")
+        return {"success": True, "mock": True, "message": "Simulated dispatch"}
+
     api_key = os.getenv("FAST2SMS_API_KEY")
     if not api_key:
         print("[Fast2SMS] FAST2SMS_API_KEY not found in environment.")
