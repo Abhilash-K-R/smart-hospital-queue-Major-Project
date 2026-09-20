@@ -22,7 +22,22 @@ DATABASE_URL = os.getenv("DATABASE_URL")
 # how to actually talk to the database." Every query eventually goes
 # through this engine.
 #
-# echo=True prints every SQL command to the terminal as it runs.
-# This is ONLY useful while learning/debugging — we will set this to
-# False before deployment, since it clutters real logs.
-engine = create_engine(DATABASE_URL, echo=True)
+# Neon PostgreSQL is serverless and drops idle connections.
+# pool_pre_ping=True automatically tests connections before use and reconnects if stale.
+# pool_recycle=300 refreshes connections every 5 minutes.
+engine = create_engine(
+    DATABASE_URL,
+    echo=False,
+    pool_pre_ping=True,
+    pool_recycle=60,
+    pool_size=10,
+    max_overflow=20,
+    connect_args={
+        "connect_timeout": 15,
+        "keepalives": 1,
+        "keepalives_idle": 30,
+        "keepalives_interval": 10,
+        "keepalives_count": 5,
+    }
+)
+

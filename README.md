@@ -1,17 +1,51 @@
-# Smart Hospital Queue Prediction and Patient Arrival Time Optimization System
+# 🏥 Shridevi MediFlow AI — Smart Hospital Queue Prediction and Patient Arrival Time Optimization System
+### Shridevi Hospital & Research Hospital, Sira Road, Tumakuru - 572106
 
-AI-based system that predicts hospital wait times, sends "leave now" alerts based on live travel time, and manages emergency patients in the queue — built as a final-year major project (VTU, Phase 2) at SIET, Tumakuru.
+AI-based system that predicts hospital wait times, sends proactive "leave now" dual WhatsApp & SMS alerts based on live travel time, and manages emergency patients in the OPD queue — built as a final-year major project (VTU) at SIET, Tumakuru.
 
-**Guide:** Dr. Rajeswari R, Dept. of CSE
-**Team:** Abhilash KR, Anjanadri TN, Laxuman, Naveen L
+**Guide:** Dr. Rajeswari R, Dept. of CSE, SIET Tumakuru  
+**Team:** Abhilash KR, Anjanadri TN, Laxuman, Naveen L  
 
 ---
 
-## What this project does
+## 🌟 Core System Capabilities
 
-1. **Wait-time prediction** — Random Forest ML model predicts how long a patient will wait, based on queue position, doctor's average consultation time, and current disruptions.
-2. **Leave-now notification** — combines Google Maps travel time with predicted wait time to tell patients exactly when to leave home.
-3. **Emergency priority queue** — staff can manually insert emergency patients; wait times for everyone else auto-recalculate.
+1. **Wait-Time Prediction (Machine Learning Engine):** Random Forest Regressor predicts how long a patient will wait based on live queue position, doctor consultation speeds, disruption delay buffers, day of week, and peak hours.
+2. **AI Smart Departure Advisor (Google Maps & Fast2SMS):** Continuously balances real-time road travel duration with a 10-minute safety buffer against predicted OPD wait times, automatically dispatching carrier SMS alerts via Fast2SMS when it is time to leave home to achieve a Zero-Wait arrival experience.
+3. **Automated & Dual-Channel Mobile Dispatch (Fast2SMS + WhatsApp):** Automatically triggers 1-credit GSM carrier SMS messages via Fast2SMS with idempotency tracking in PostgreSQL, alongside rich WhatsApp notifications with 1-click direction links.
+4. **Emergency Priority Queue Triage:** Hospital staff can immediately insert emergency walk-ins at Position #1 (`EMG-xxx`), dynamically bumping regular queues and recalculating downstream wait times in real-time.
+5. **Post-Consultation Evaluation Logging:** Live telemetry logs (`queue_logs` table in Neon Serverless PostgreSQL) tracking predicted vs actual consultation durations for model accuracy assessment.
+
+---
+
+## ⚡ Quick Start — Running the Full System (See [`run.md`](./run.md))
+
+For complete presentation instructions and demo credentials, refer to [`run.md`](./run.md).
+
+### 1. Start the FastAPI Backend
+```powershell
+cd backend
+.\venv\Scripts\activate
+uvicorn main:app --reload --port 8000
+```
+- API Documentation & Swagger UI: [http://localhost:8000/docs](http://localhost:8000/docs)
+- Health Check: [http://localhost:8000/](http://localhost:8000/)
+
+### 2. Start the Patient React App (Shridevi MediFlow AI)
+```powershell
+cd patient-app
+npm run dev
+```
+- Patient Portal: [http://localhost:3000](http://localhost:3000)
+
+### 3. Start the Staff & Doctor Dashboard (Shridevi Hospital Portal)
+```powershell
+cd staff-dashboard
+npm run dev
+```
+- Staff Portal: [http://localhost:5173](http://localhost:5173) *(or check terminal if port 3001 is assigned)*
+- Staff Login: Username `admin` or `reception1` | Password `Staff@123`
+
 
 ---
 
