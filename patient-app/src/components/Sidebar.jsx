@@ -33,7 +33,9 @@ export const Sidebar = () => {
             />
             <div className="min-w-0">
               <h4 className="text-xs font-bold text-slate-900 dark:text-white truncate">{user.name}</h4>
-              <p className="text-[10px] text-blue-600 dark:text-blue-400 font-semibold truncate">Token: {user.tokenNumber}</p>
+              <p className="text-[10px] text-blue-600 dark:text-blue-400 font-semibold truncate">
+                {user.tokenNumber ? `Token: ${user.tokenNumber}` : 'No Active Token'}
+              </p>
             </div>
           </div>
         )}

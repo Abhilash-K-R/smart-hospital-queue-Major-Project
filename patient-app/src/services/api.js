@@ -12,7 +12,11 @@ const api = axios.create({
 // Adds the persisted bearer token to authenticated requests.
 api.interceptors.request.use(
   (config) => {
-    const token = localStorage.getItem('mediflow_auth_token');
+    const token =
+      localStorage.getItem('mediflow_auth_token') ||
+      localStorage.getItem('token') ||
+      localStorage.getItem('auth_token') ||
+      localStorage.getItem('access_token');
     if (token) {
       config.headers.Authorization = `Bearer ${token}`;
     }

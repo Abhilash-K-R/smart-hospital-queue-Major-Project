@@ -21,10 +21,17 @@ export const TopBar = ({ title = "Dashboard Overview", subtitle = "Real-time que
         </div>
 
         {/* Live Token Indicator */}
-        <div className="flex items-center gap-2 px-3.5 py-1.5 rounded-xl bg-blue-600 text-white shadow-lg shadow-blue-500/25 text-xs font-extrabold">
-          <Clock className="w-3.5 h-3.5" />
-          <span>Your Token: {queueState.tokenNumber}</span>
-        </div>
+        {queueState.tokenNumber ? (
+          <div className="flex items-center gap-2 px-3.5 py-1.5 rounded-xl bg-blue-600 text-white shadow-lg shadow-blue-500/25 text-xs font-extrabold">
+            <Clock className="w-3.5 h-3.5" />
+            <span>Your Token: {queueState.tokenNumber}</span>
+          </div>
+        ) : (
+          <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 text-xs font-semibold">
+            <Clock className="w-3.5 h-3.5" />
+            <span>No Active Token</span>
+          </div>
+        )}
       </div>
     </div>
   );

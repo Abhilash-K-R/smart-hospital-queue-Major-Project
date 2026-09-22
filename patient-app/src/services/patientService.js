@@ -8,91 +8,82 @@ export const patientService = {
       const res = await api.post('/auth/login', credentials);
       if (res && res.token) {
         localStorage.setItem('mediflow_auth_token', res.token);
+        localStorage.setItem('token', res.token);
+        localStorage.setItem('access_token', res.token);
       }
       return res;
-    } catch {
+    } catch (err) {
+      if (err.response && err.response.status === 401) {
+        throw err;
+      }
       // Demo mode fallback
+      const fallbackToken = 'demo-jwt-token-laxuman-10928';
+      localStorage.setItem('mediflow_auth_token', fallbackToken);
+      localStorage.setItem('token', fallbackToken);
+      localStorage.setItem('access_token', fallbackToken);
       return {
         success: true,
         user: DEMO_PATIENT,
-        token: 'demo-jwt-token-laxuman-10928'
+        token: fallbackToken
       };
     }
+  },
+
+  // Standard user signup (creates persistent patient record in DB)
+  async signup(payload) {
+    return await api.post('/auth/register', payload);
+  },
+
+  // Requests a virtual OTP for forgot password verification
+  async requestForgotPasswordOTP(phone) {
+    return await api.post('/auth/forgot-password/request', { phone });
+  },
+
+  // Resets password using virtual OTP
+  async resetPassword(payload) {
+    return await api.post('/auth/forgot-password/reset', payload);
   },
 
   // Registers a patient and appointment, saving the JWT token for live session.
   async registerPatient(formData) {
-    try {
-      const res = await api.post('/patients/register', formData);
-      if (res && res.token) {
-        localStorage.setItem('mediflow_auth_token', res.token);
-      }
-      if (res && res.patient) {
-        localStorage.setItem('mediflow_user', JSON.stringify(res.patient));
-      }
-      return res;
-    } catch {
-      // Generate demo token
-      const newTokenNum = Math.floor(Math.random() * 20) + 15;
-      return {
-        success: true,
-        message: "Registration & Appointment Booking Successful!",
-        patient: {
-          ...DEMO_PATIENT,
-          ...formData,
-          tokenNumber: `OPD-0${newTokenNum}`,
-          numericToken: newTokenNum,
-          currentToken: Math.max(1, newTokenNum - 6),
-          patientsAhead: 6,
-          estimatedWaitMinutes: 24
-        }
-      };
+    const res = await api.post('/patients/register', formData);
+    if (res && res.token) {
+      localStorage.setItem('mediflow_auth_token', res.token);
+      localStorage.setItem('token', res.token);
+      localStorage.setItem('access_token', res.token);
     }
+    if (res && res.patient) {
+      localStorage.setItem('mediflow_user', JSON.stringify(res.patient));
+    }
+    return res;
   },
 
   // Books a new appointment with a doctor, writing to Neon PostgreSQL.
   async bookAppointment(appointmentData) {
-    try {
-      const res = await api.post('/patients/book', appointmentData);
-      if (res && res.patient) {
-        localStorage.setItem('mediflow_user', JSON.stringify(res.patient));
-      }
-      return res;
-    } catch (err) {
-      console.warn("API booking fallback:", err);
-      const newTokenNum = Math.floor(Math.random() * 20) + 15;
-      return {
-        success: true,
-        message: "Appointment successfully booked and token issued!",
-        appointment_id: 999,
-        tokenNumber: `OPD-0${newTokenNum}`,
-        numericToken: newTokenNum,
-        currentToken: `OPD-0${Math.max(1, newTokenNum - 4)}`,
-        patientsAhead: 4,
-        estimatedWaitMinutes: 20,
-        doctor: appointmentData.doctor || "Dr. Rajeswari R.",
-        department: appointmentData.department || "General Medicine",
-        roomNo: "Room 204",
-        booked_time: "Now",
-        patient: {
-          ...DEMO_PATIENT,
-          ...appointmentData,
-          tokenNumber: `OPD-0${newTokenNum}`,
-          numericToken: newTokenNum,
-          currentToken: `OPD-0${Math.max(1, newTokenNum - 4)}`,
-          patientsAhead: 4,
-          estimatedWaitMinutes: 20
-        }
-      };
+    const res = await api.post('/patients/book', appointmentData);
+    if (res && res.patient) {
+      localStorage.setItem('mediflow_user', JSON.stringify(res.patient));
     }
+    return res;
   },
 
-  // Loads the authenticated profile or returns the demo patient.
+  // Loads the authenticated profile or returns null.
   async getProfile() {
     try {
       return await api.get('/patients/profile');
     } catch {
-      return DEMO_PATIENT;
+      return null;
+    }
+  },
+
+  // Fetches patient's active and past appointments
+  async getMyAppointments(phone = null) {
+    try {
+      const url = phone ? `/appointments/me?phone=${encodeURIComponent(phone)}` : '/appointments/me';
+      return await api.get(url);
+    } catch (err) {
+      console.warn("Fetch my appointments failed:", err.message);
+      return [];
     }
   },
 

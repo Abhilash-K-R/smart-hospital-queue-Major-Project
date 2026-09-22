@@ -92,8 +92,8 @@ const Queue = () => {
     try {
       const res = await api.post('/notifications/dispatch-preview', {
         appointment_id: patient.id,
-        patient_name: patient.name,
-        phone: patient.phone || "9876543210",
+        patient_name: patient.patient_name || patient.name,
+        phone: patient.contact_phone || patient.phone || "9876543210",
         token_number: patient.tokenNumber
       });
       
@@ -101,7 +101,7 @@ const Queue = () => {
       if (shareUrl) {
         window.open(shareUrl, '_blank');
       }
-      setActionMessage(`✅ WhatsApp & SMS departure alert dispatched to ${patient.name} (${patient.tokenNumber})`);
+      setActionMessage(`✅ WhatsApp & SMS departure alert dispatched to ${patient.patient_name || patient.name} (${patient.tokenNumber})`);
       setTimeout(() => setActionMessage(''), 4000);
     } catch (err) {
       console.error("Error dispatching alert:", err);
@@ -121,7 +121,9 @@ const Queue = () => {
     if (!searchQuery.trim()) return true;
     const q = searchQuery.toLowerCase();
     return (
+      (item.patient_name && item.patient_name.toLowerCase().includes(q)) ||
       (item.name && item.name.toLowerCase().includes(q)) ||
+      (item.contact_phone && item.contact_phone.includes(q)) ||
       (item.tokenNumber && item.tokenNumber.toLowerCase().includes(q)) ||
       (item.doctor && item.doctor.toLowerCase().includes(q)) ||
       (item.department && item.department.toLowerCase().includes(q))
@@ -244,9 +246,19 @@ const Queue = () => {
                     </div>
                   </td>
                   <td className="py-4 px-6">
-                    <div className="text-sm font-semibold text-slate-900">{patient.name}</div>
-                    <div className="text-xs text-slate-500">Age: {patient.age || 35} yrs • {patient.gender || 'Patient'}</div>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="text-sm font-semibold text-slate-900">{patient.patient_name || patient.name}</span>
+                      {patient.is_dependent && (
+                        <span className="text-[10px] bg-purple-100 text-purple-800 font-bold px-2 py-0.5 rounded-full border border-purple-200">
+                          Dependent {patient.primary_patient_name ? `(Booked by ${patient.primary_patient_name})` : ''}
+                        </span>
+                      )}
+                    </div>
+                    <div className="text-xs text-slate-500 mt-0.5">
+                      Age: {patient.patient_age || patient.age || 35} yrs • {patient.patient_gender || patient.gender || 'Patient'} • 📞 {patient.contact_phone || "9876543210"}
+                    </div>
                   </td>
+
                   <td className="py-4 px-6">
                     <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium border ${getTriageColor(patient.triage)}`}>
                       {patient.triage}
@@ -254,6 +266,7 @@ const Queue = () => {
                   </td>
                   <td className="py-4 px-6">
                     <div className="text-sm font-semibold text-slate-900">{patient.waitTime}</div>
+                    <div className="text-xs font-semibold text-blue-600">Slot: {patient.time_slot || "09:30 AM"}</div>
                     <div className="text-xs text-slate-400">Booked: {patient.booked_time}</div>
                   </td>
                   <td className="py-4 px-6">

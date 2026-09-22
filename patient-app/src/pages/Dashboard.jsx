@@ -9,7 +9,7 @@ import { EmergencyAlert } from '../components/EmergencyAlert';
 import { Button } from '../components/Button';
 import { StatusBadge } from '../components/StatusBadge';
 import { PROJECT_INFO } from '../utils/constants';
-import { Clock, Navigation, Calendar, FileText, Siren, ShieldCheck, BrainCircuit, Users, CheckCircle2, ArrowRight } from 'lucide-react';
+import { Clock, Navigation, Calendar, FileText, Siren, ShieldCheck, BrainCircuit, Users, CheckCircle2, ArrowRight, Ticket, Sparkles } from 'lucide-react';
 
 // Combines patient identity, queue progress, AI actions, and quick navigation.
 export const Dashboard = () => {
@@ -17,11 +17,16 @@ export const Dashboard = () => {
   const { user } = useAuth();
   const { queueState } = useQueue();
 
+  const hasActiveToken = Boolean(queueState.hasActiveToken || queueState.tokenNumber || user?.tokenNumber);
+
   return (
     <div className="space-y-8">
       
       {/* Top Header */}
-      <TopBar title={`Welcome back, ${user?.name || 'Laxuman G'}!`} subtitle="Your active OPD consultation queue status and AI departure tracker" />
+      <TopBar 
+        title={`Welcome back, ${user?.name || 'Patient'}!`} 
+        subtitle={hasActiveToken ? "Your active OPD consultation queue status and AI departure tracker" : "Track live hospital OPD queues and schedule specialist appointments"} 
+      />
 
       {/* Emergency Alert Banner (Shown dynamically when staff declares an emergency) */}
       {queueState.emergencyCount > 0 && (
@@ -31,21 +36,43 @@ export const Dashboard = () => {
       {/* Main Grid Section */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
         
-        {/* Left Column (8 cols): Queue Card + Live Progress Radar */}
+        {/* Left Column (8 cols): Queue Card + Live Progress Radar OR Clean Empty State */}
         <div className="lg:col-span-8 space-y-8">
           
-          {/* Active Token Card */}
-          <QueueCard queueData={queueState} />
+          {hasActiveToken ? (
+            <>
+              {/* Active Token Card */}
+              <QueueCard queueData={queueState} />
 
-          {/* Circular & Linear Queue Progression Radar */}
-          <ProgressCard
-            tokenNumber={queueState.tokenNumber}
-            currentToken={queueState.currentToken}
-            numericToken={queueState.numericToken}
-            patientsAhead={queueState.patientsAhead}
-            estimatedWaitMinutes={queueState.estimatedWaitMinutes}
-            emergencyCount={queueState.emergencyCount}
-          />
+              {/* Circular & Linear Queue Progression Radar */}
+              <ProgressCard
+                tokenNumber={queueState.tokenNumber}
+                currentToken={queueState.currentToken}
+                numericToken={queueState.numericToken}
+                patientsAhead={queueState.patientsAhead}
+                estimatedWaitMinutes={queueState.estimatedWaitMinutes}
+                emergencyCount={queueState.emergencyCount}
+              />
+            </>
+          ) : (
+            /* Clean Empty State Card When Patient Has No Active Token */
+            <div className="glass-card rounded-3xl p-8 border border-slate-200 dark:border-slate-800 text-center space-y-5 relative overflow-hidden">
+              <div className="w-16 h-16 mx-auto rounded-3xl bg-blue-50 dark:bg-blue-950/50 text-blue-600 dark:text-blue-400 flex items-center justify-center shadow-lg shadow-blue-500/10">
+                <Ticket className="w-8 h-8" />
+              </div>
+              <div className="space-y-2 max-w-md mx-auto">
+                <h3 className="text-2xl font-black text-slate-900 dark:text-white">No Active OPD Token</h3>
+                <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed">
+                  You do not have any appointments scheduled for today. Book an appointment with our specialist doctors to receive your live queue pass and real-time AI departure alerts.
+                </p>
+              </div>
+              <div className="pt-2 flex justify-center">
+                <Button onClick={() => navigate('/appointment')} icon={Calendar} size="md">
+                  Book OPD Appointment
+                </Button>
+              </div>
+            </div>
+          )}
 
           {/* Quick Actions Bar */}
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
@@ -102,30 +129,53 @@ export const Dashboard = () => {
               <Navigation className="w-5 h-5 animate-pulse" />
             </div>
 
-            <div>
-              <p className="text-xs font-semibold text-cyan-100">RECOMMENDED DEPARTURE</p>
-              <h3 className="text-3xl font-black mt-1">Leave in {queueState.leaveAfterMinutes} Mins</h3>
-            </div>
+            {hasActiveToken ? (
+              <>
+                <div>
+                  <p className="text-xs font-semibold text-cyan-100">RECOMMENDED DEPARTURE</p>
+                  <h3 className="text-3xl font-black mt-1">Leave in {queueState.leaveAfterMinutes} Mins</h3>
+                </div>
 
-            <div className="pt-2 border-t border-white/20 text-xs space-y-1.5 text-cyan-50">
-              <div className="flex justify-between">
-                <span>Traffic Travel Time:</span>
-                <span className="font-bold">{queueState.trafficDurationMinutes} Mins</span>
-              </div>
-              <div className="flex justify-between">
-                <span>OPD Wait Time:</span>
-                <span className="font-bold">{queueState.estimatedWaitMinutes} Mins</span>
-              </div>
-            </div>
+                <div className="pt-2 border-t border-white/20 text-xs space-y-1.5 text-cyan-50">
+                  <div className="flex justify-between">
+                    <span>Traffic Travel Time:</span>
+                    <span className="font-bold">{queueState.trafficDurationMinutes} Mins</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span>OPD Wait Time:</span>
+                    <span className="font-bold">{queueState.estimatedWaitMinutes} Mins</span>
+                  </div>
+                </div>
 
-            <Button
-              className="w-full bg-white text-blue-700 hover:bg-slate-100"
-              size="sm"
-              icon={ArrowRight}
-              onClick={() => navigate('/arrival-prediction')}
-            >
-              View Route & GPS Map
-            </Button>
+                <Button
+                  className="w-full bg-white text-blue-700 hover:bg-slate-100"
+                  size="sm"
+                  icon={ArrowRight}
+                  onClick={() => navigate('/arrival-prediction')}
+                >
+                  View Route & GPS Map
+                </Button>
+              </>
+            ) : (
+              <>
+                <div>
+                  <p className="text-xs font-semibold text-cyan-100">COMMUTE OPTIMIZER</p>
+                  <h3 className="text-xl font-bold mt-1">Ready to Plan Commute?</h3>
+                  <p className="text-xs text-cyan-100/90 mt-1">
+                    Book a slot to calculate real-time departure time and skip the waiting lounge.
+                  </p>
+                </div>
+
+                <Button
+                  className="w-full bg-white text-blue-700 hover:bg-slate-100"
+                  size="sm"
+                  icon={Calendar}
+                  onClick={() => navigate('/appointment')}
+                >
+                  Book Appointment Slot
+                </Button>
+              </>
+            )}
           </div>
 
           {/* AI Accuracy & Project Metrics */}

@@ -98,6 +98,7 @@ from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 # our own tokens via a JSON /login endpoint rather than a standard OAuth2
 # token endpoint, HTTPBearer matches our actual flow better.
 security_scheme = HTTPBearer()
+optional_security_scheme = HTTPBearer(auto_error=False)
 
 
 def get_current_user(
@@ -123,3 +124,15 @@ def get_current_user(
             headers={"WWW-Authenticate": "Bearer"},
         )
     return payload
+
+
+def get_optional_current_user(
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(optional_security_scheme),
+) -> Optional[dict]:
+    """
+    Optional authentication dependency for routes accessible in demo mode or public navigation.
+    Returns token payload dict if valid, or None if no token / demo token provided.
+    """
+    if not credentials or not credentials.credentials:
+        return None
+    return verify_access_token(credentials.credentials)

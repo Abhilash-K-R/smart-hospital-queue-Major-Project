@@ -1,29 +1,42 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
-import { useNavigate, Link } from 'react-router-dom';
+import { useNavigate, Link, useSearchParams } from 'react-router-dom';
 import { loginSchema } from '../utils/validators';
 import { useAuth } from '../context/AuthContext';
 import { Input } from '../components/Input';
 import { Button } from '../components/Button';
-import { Activity, Mail, Lock, Sparkles, UserCheck, ShieldCheck } from 'lucide-react';
+import { Activity, Mail, Lock, Sparkles, UserCheck, ShieldCheck, CheckCircle2, Phone } from 'lucide-react';
 import { DEMO_PATIENT } from '../utils/constants';
 import { patientService } from '../services/patientService';
 
 // Validates credentials, invokes the patient service, and starts the session.
 export const Login = () => {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const { login } = useAuth();
+  
+  const isJustRegistered = searchParams.get('registered') === 'true';
+  const isJustReset = searchParams.get('reset') === 'true';
+  const prefilledPhone = searchParams.get('phone') || '';
+  const [loginError, setLoginError] = useState(null);
 
-  const { register, handleSubmit, formState: { errors } } = useForm({
+  const { register, handleSubmit, setValue, formState: { errors } } = useForm({
     resolver: zodResolver(loginSchema),
     defaultValues: {
-      emailOrPhone: DEMO_PATIENT.email,
-      password: "password123"
+      emailOrPhone: prefilledPhone || DEMO_PATIENT.email,
+      password: isJustRegistered ? "" : "password123"
     }
   });
 
+  useEffect(() => {
+    if (prefilledPhone) {
+      setValue('emailOrPhone', prefilledPhone);
+    }
+  }, [prefilledPhone, setValue]);
+
   const onSubmit = async (data) => {
+    setLoginError(null);
     try {
       const res = await patientService.login({
         emailOrPhone: data.emailOrPhone,
@@ -31,14 +44,19 @@ export const Login = () => {
       });
       if (res && res.user) {
         login(res.user);
+        // If user has an active appointment, go to dashboard, else go to book appointment
+        if (res.user.appointment_id) {
+          navigate('/dashboard');
+        } else {
+          navigate('/appointment');
+        }
       } else {
-        login({ ...DEMO_PATIENT, email: data.emailOrPhone });
+        login({ ...DEMO_PATIENT, phone: data.emailOrPhone, email: data.emailOrPhone });
+        navigate('/dashboard');
       }
-      navigate('/dashboard');
     } catch (err) {
-      console.warn("API login failed, continuing with fallback user", err);
-      login({ ...DEMO_PATIENT, email: data.emailOrPhone });
-      navigate('/dashboard');
+      const errorMsg = err.response?.data?.detail || "Invalid mobile number or password.";
+      setLoginError(errorMsg);
     }
   };
 
@@ -63,6 +81,35 @@ export const Login = () => {
         {/* Card */}
         <div className="glass-card rounded-3xl p-8 space-y-6 shadow-2xl border border-slate-200 dark:border-slate-800">
           
+          {/* Registration Success Toast */}
+          {isJustRegistered && (
+            <div className="p-3.5 bg-emerald-50 dark:bg-emerald-950/50 border border-emerald-300 dark:border-emerald-800 rounded-2xl flex items-center gap-3 text-emerald-800 dark:text-emerald-200 text-xs animate-in fade-in duration-300 shadow-sm">
+              <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0" />
+              <div>
+                <strong className="block font-bold">Account created successfully!</strong>
+                <span>Please sign in with your mobile number and password.</span>
+              </div>
+            </div>
+          )}
+
+          {/* Password Reset Success Toast */}
+          {isJustReset && (
+            <div className="p-3.5 bg-emerald-50 dark:bg-emerald-950/50 border border-emerald-300 dark:border-emerald-800 rounded-2xl flex items-center gap-3 text-emerald-800 dark:text-emerald-200 text-xs animate-in fade-in duration-300 shadow-sm">
+              <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0" />
+              <div>
+                <strong className="block font-bold">Password updated successfully!</strong>
+                <span>Please sign in with your new password.</span>
+              </div>
+            </div>
+          )}
+
+          {/* Login Error Alert */}
+          {loginError && (
+            <div className="p-3.5 bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-900/60 rounded-2xl flex items-center gap-3 text-rose-700 dark:text-rose-300 text-xs">
+              <span>⚠️ {loginError}</span>
+            </div>
+          )}
+
           {/* Quick Demo Mode Login Banner */}
           <div className="p-3 bg-amber-500/10 border border-amber-500/30 rounded-2xl flex items-center justify-between gap-3">
             <div className="flex items-center gap-2">
@@ -82,9 +129,9 @@ export const Login = () => {
 
           <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
             <Input
-              label="Email or Mobile Number"
-              placeholder="e.g. laxuman.patient@mediflow.ai"
-              icon={Mail}
+              label="Mobile Number or Email"
+              placeholder="e.g. 9876543210 or email"
+              icon={Phone}
               error={errors.emailOrPhone?.message}
               {...register('emailOrPhone')}
             />
@@ -103,7 +150,9 @@ export const Login = () => {
                 <input type="checkbox" defaultChecked className="rounded text-blue-600 focus:ring-blue-500" />
                 Remember credentials
               </label>
-              <a href="#forgot" className="text-blue-600 dark:text-blue-400 font-semibold hover:underline">Forgot password?</a>
+              <Link to="/forgot-password" className="text-blue-600 dark:text-blue-400 font-semibold hover:underline">
+                Forgot password?
+              </Link>
             </div>
 
             <Button type="submit" className="w-full" size="lg" icon={UserCheck}>
@@ -114,7 +163,7 @@ export const Login = () => {
           <div className="pt-4 border-t border-slate-200 dark:border-slate-800 text-center text-xs text-slate-500">
             Don't have an account?{' '}
             <Link to="/register" className="text-blue-600 dark:text-blue-400 font-bold hover:underline">
-              Register & Book OPD Token
+              Sign Up / Register
             </Link>
           </div>
         </div>
@@ -123,3 +172,4 @@ export const Login = () => {
     </div>
   );
 };
+export default Login;

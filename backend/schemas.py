@@ -89,7 +89,24 @@ class AppointmentCreateRequest(BaseModel):
     department: Optional[str] = None
     date: Optional[str] = None
     time_slot: Optional[str] = None
+    timeSlot: Optional[str] = None
     symptoms: Optional[str] = None
+    patient_id: Optional[Union[int, str]] = None
+    phone: Optional[str] = None
+    email: Optional[str] = None
+    patient_name: Optional[str] = None
+    patient_age: Optional[Union[int, str]] = 30
+    patient_gender: Optional[str] = "Male"
+    contact_phone: Optional[str] = None
+    is_dependent: Optional[bool] = False
+    beneficiary_name: Optional[str] = None
+    beneficiary_age: Optional[Union[int, str]] = None
+    beneficiary_gender: Optional[str] = None
+    patient_lat: Optional[float] = None
+    patient_lng: Optional[float] = None
+    origin_name: Optional[str] = None
+    origin_mode: Optional[str] = None
+    is_family_booking: Optional[bool] = False
 
 
 class AppointmentResponse(BaseModel):
@@ -104,6 +121,14 @@ class AppointmentResponse(BaseModel):
     doctor: Optional[str] = None
     department: Optional[str] = None
     roomNo: Optional[str] = None
+    time_slot: Optional[str] = None
+    appointment_date: Optional[str] = None
+    patient_name: Optional[str] = None
+    patient_age: Optional[int] = None
+    patient_gender: Optional[str] = None
+    contact_phone: Optional[str] = None
+    is_dependent: Optional[bool] = False
+    primary_patient_name: Optional[str] = None
     patientsAhead: Optional[int] = 0
     estimatedWaitMinutes: Optional[float] = 0.0
 
@@ -129,6 +154,7 @@ class DepartureCheckResponse(BaseModel):
     travel_time_minutes: int
     should_leave_now: bool
     message: str
+    distance_km: Optional[float] = None
 
 
 # ---------------------------------------------------------------------
@@ -145,6 +171,38 @@ class FrontendLoginResponse(BaseModel):
     success: bool = True
     token: str
     user: dict
+
+
+class AuthRegisterRequest(BaseModel):
+    name: Optional[str] = None
+    fullName: Optional[str] = None
+    phone: str
+    password: str
+    email: Optional[str] = None
+
+
+class AuthRegisterResponse(BaseModel):
+    success: bool = True
+    message: str
+    patient_id: int
+    name: str
+    phone: str
+
+
+class ForgotPasswordRequest(BaseModel):
+    phone: str
+
+
+class ForgotPasswordResetRequest(BaseModel):
+    phone: str
+    otp: str
+    newPassword: str
+
+
+class ForgotPasswordResponse(BaseModel):
+    success: bool = True
+    message: str
+    otp: Optional[str] = None
 
 
 class FrontendRegisterRequest(BaseModel):
@@ -176,6 +234,13 @@ class AppointmentBookRequest(BaseModel):
     symptoms: Optional[str] = None
     patient_name: Optional[str] = None
     patient_id: Optional[str] = None
+    patient_age: Optional[int] = None
+    patient_gender: Optional[str] = None
+    contact_phone: Optional[str] = None
+    is_dependent: Optional[bool] = False
+    beneficiary_name: Optional[str] = None
+    beneficiary_age: Optional[int] = None
+    beneficiary_gender: Optional[str] = None
     email: Optional[str] = None
     phone: Optional[str] = None
 
@@ -193,6 +258,14 @@ class AppointmentBookResponse(BaseModel):
     department: str
     roomNo: str
     booked_time: str
+    time_slot: Optional[str] = None
+    timeSlot: Optional[str] = None
+    appointment_date: Optional[str] = None
+    patient_name: Optional[str] = None
+    patient_age: Optional[int] = None
+    patient_gender: Optional[str] = None
+    contact_phone: Optional[str] = None
+    is_dependent: Optional[bool] = False
     patient: dict
 
 
@@ -213,13 +286,37 @@ class FrontendQueueStatusResponse(BaseModel):
 
 
 
+class DoctorQueueStreamItem(BaseModel):
+    id: int
+    tokenNumber: str
+    numericToken: int
+    patient_name: str
+    status: str  # 'serving', 'pending', 'completed'
+    queue_position: Optional[int] = None
+    booked_time: str
+    waitTime: str
+
+
+class DoctorQueueStreamResponse(BaseModel):
+    doctor_id: int
+    doctor: str
+    department: str
+    roomNo: str
+    avg_consult_minutes: int
+    servingToken: Optional[str] = None
+    patientsInQueue: int
+    queue: List[DoctorQueueStreamItem]
+
+
 class NotificationItem(BaseModel):
     id: int
     title: str
     message: str
     timestamp: str
     read: bool
-    type: str  # 'alert', 'info', 'warning', 'emergency'
+    type: str  # 'booking_confirmed', 'next_in_line', 'consultation_completed', 'no_show_warning', 'slot_expired', 'leave_now', 'emergency', 'info'
+    severity: Optional[str] = "info"  # 'success', 'info', 'warning', 'critical'
+    priority: Optional[str] = "info"  # 'high', 'warning', 'info', 'success'
 
 
 class DispatchNotificationRequest(BaseModel):
@@ -280,6 +377,12 @@ class StaffQueueItem(BaseModel):
     name: str
     age: int | None = None
     gender: str | None = None
+    patient_name: Optional[str] = None
+    patient_age: Optional[int] = None
+    patient_gender: Optional[str] = None
+    contact_phone: Optional[str] = None
+    is_dependent: Optional[bool] = False
+    primary_patient_name: Optional[str] = None
     triage: str  # 'Critical', 'Urgent', 'Standard'
     tokenNumber: str
     queue_position: int
@@ -289,6 +392,9 @@ class StaffQueueItem(BaseModel):
     waitTime: str
     status: str  # 'pending', 'serving', 'completed', 'skipped'
     booked_time: str
+    time_slot: Optional[str] = "09:30 AM"
+    appointment_date: Optional[str] = None
+
 
 
 class EmergencyInsertRequest(BaseModel):

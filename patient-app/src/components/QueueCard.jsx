@@ -6,14 +6,16 @@ import { StatusBadge } from './StatusBadge';
 // Summarizes the patient's token against the currently served queue token.
 export const QueueCard = ({ queueData }) => {
   const {
-    tokenNumber = "GEN-018",
-    currentToken = 12,
-    patientsAhead = 6,
-    estimatedWaitMinutes = 24,
-    doctor = "Dr. Rajeswari N.",
+    tokenNumber = null,
+    currentToken = null,
+    patientsAhead = 0,
+    estimatedWaitMinutes = 0,
+    doctor = "Assigned Doctor",
     department = "General Medicine",
-    roomNo = "O.P.D Block B - Room 204"
+    roomNo = "OPD Consultation Room"
   } = queueData || {};
+
+  if (!tokenNumber) return null;
 
   return (
     <motion.div

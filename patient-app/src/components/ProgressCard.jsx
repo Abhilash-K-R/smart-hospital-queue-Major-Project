@@ -5,18 +5,20 @@ import { StatusBadge } from './StatusBadge';
 
 // Visualizes queue progress, patients ahead, wait time, and emergency impact.
 export const ProgressCard = ({
-  tokenNumber = "GEN-018",
-  currentToken = 12,
-  numericToken = 18,
-  patientsAhead = 6,
-  estimatedWaitMinutes = 24,
-  emergencyCount = 1
+  tokenNumber = null,
+  currentToken = null,
+  numericToken = null,
+  patientsAhead = 0,
+  estimatedWaitMinutes = 0,
+  emergencyCount = 0
 }) => {
+  if (!tokenNumber) return null;
+
   // Calculate progress percentage safely
   const currNum = typeof currentToken === 'number' 
     ? currentToken 
-    : (parseInt(String(currentToken).replace(/\D/g, '')) || 1);
-  const total = numericToken || 18;
+    : (parseInt(String(currentToken || '1').replace(/\D/g, '')) || 1);
+  const total = numericToken || currNum || 1;
   const progressPercent = Math.min(100, Math.max(0, Math.round((currNum / total) * 100)));
 
   // Circular progress calculations

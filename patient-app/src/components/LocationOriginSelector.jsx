@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   MapPin,
   Navigation,
@@ -7,14 +7,14 @@ import {
   Check,
   Search,
   Sparkles,
-  Info,
+  Loader2,
   X
 } from 'lucide-react';
-import { resolvePincode, LOCATION_PRESETS } from '../utils/locationResolver';
+import { resolvePincode, LOCATION_PRESETS, PINCODE_DATABASE, cleanseLocationName } from '../utils/locationResolver';
 
 /**
  * Dual-Mode Location Origin Selector Modal / Card
- * Enables seamless switching between Live GPS and Manual / Family Booking (Pincode / Preset).
+ * Enables seamless switching between Live GPS and Manual / Family Booking (Pincode, City/Town Autocomplete, or Preset).
  */
 export const LocationOriginSelector = ({
   isOpen,
@@ -25,42 +25,230 @@ export const LocationOriginSelector = ({
   isLocating
 }) => {
   const [activeTab, setActiveTab] = useState(currentLocation?.mode === 'manual' ? 'manual' : 'gps');
-  const [pincodeInput, setPincodeInput] = useState(currentLocation?.pincode || '');
+  const [searchInput, setSearchInput] = useState(() => cleanseLocationName(currentLocation?.pincode || currentLocation?.name || ''));
+  const [selectedLocation, setSelectedLocation] = useState(null);
   const [resolvedPreview, setResolvedPreview] = useState(() => 
     currentLocation?.pincode ? resolvePincode(currentLocation.pincode) : null
   );
   const [isFamilyBooking, setIsFamilyBooking] = useState(Boolean(currentLocation?.isFamilyBooking));
   const [beneficiaryName, setBeneficiaryName] = useState(currentLocation?.beneficiaryName || '');
+  
+  // GPS State inside modal
+  const [gpsData, setGpsData] = useState(() => {
+    if (currentLocation?.mode === 'gps' && currentLocation?.lat && currentLocation?.lng) {
+      return {
+        lat: currentLocation.lat,
+        lng: currentLocation.lng,
+        name: cleanseLocationName(currentLocation.name) || 'Live Location'
+      };
+    }
+    return null;
+  });
+  const [isDetectingGPS, setIsDetectingGPS] = useState(false);
+
+  // Autocomplete state
+  const [searchResults, setSearchResults] = useState([]);
+  const [isSearching, setIsSearching] = useState(false);
+  const [showDropdown, setShowDropdown] = useState(false);
+  const dropdownRef = useRef(null);
+  const isSelectingRef = useRef(false);
+
+  useEffect(() => {
+    if (isOpen) {
+      setActiveTab(currentLocation?.mode === 'manual' ? 'manual' : 'gps');
+      setSearchInput(cleanseLocationName(currentLocation?.pincode || currentLocation?.name || ''));
+      setIsFamilyBooking(Boolean(currentLocation?.isFamilyBooking));
+      setBeneficiaryName(currentLocation?.beneficiaryName || '');
+      setShowDropdown(false);
+      setSearchResults([]);
+      isSelectingRef.current = false;
+      if (currentLocation?.mode === 'gps' && currentLocation?.lat && currentLocation?.lng) {
+        setGpsData({
+          lat: currentLocation.lat,
+          lng: currentLocation.lng,
+          name: cleanseLocationName(currentLocation.name) || 'Live Location'
+        });
+      } else {
+        setGpsData(null);
+      }
+    }
+  }, [isOpen, currentLocation]);
+
+  const handleRedetectGPS = () => {
+    if (!('geolocation' in navigator)) {
+      alert("Geolocation is not supported by your browser.");
+      return;
+    }
+    setIsDetectingGPS(true);
+    navigator.geolocation.getCurrentPosition(
+      async (pos) => {
+        const { latitude, longitude } = pos.coords;
+        try {
+          const backendUrl = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+          const resp = await fetch(`${backendUrl}/geocode/reverse?lat=${latitude}&lng=${longitude}`);
+          let placeName = `GPS (${latitude.toFixed(4)}, ${longitude.toFixed(4)})`;
+          if (resp.ok) {
+            const data = await resp.json();
+            if (data && data.formatted_address) {
+              placeName = data.formatted_address;
+            }
+          }
+          const acquired = {
+            lat: latitude,
+            lng: longitude,
+            name: placeName
+          };
+          setGpsData(acquired);
+          setSelectedLocation({
+            mode: 'gps',
+            lat: latitude,
+            lng: longitude,
+            name: placeName,
+            status: 'acquired'
+          });
+        } catch (err) {
+          setGpsData({
+            lat: latitude,
+            lng: longitude,
+            name: `GPS (${latitude.toFixed(4)}, ${longitude.toFixed(4)})`
+          });
+        } finally {
+          setIsDetectingGPS(false);
+        }
+      },
+      (err) => {
+        setIsDetectingGPS(false);
+        alert(`GPS failed: ${err.message || 'Position unavailable'}`);
+        setGpsData(null);
+        setSelectedLocation(null);
+      },
+      {
+        enableHighAccuracy: true,
+        timeout: 15000,
+        maximumAge: 0
+      }
+    );
+  };
+
+  // Debounced search for place name / PIN
+  useEffect(() => {
+    if (isSelectingRef.current) {
+      isSelectingRef.current = false;
+      return;
+    }
+
+    const clean = cleanseLocationName(searchInput).trim();
+    if (!clean || clean.length < 2) {
+      setSearchResults([]);
+      setIsSearching(false);
+      setShowDropdown(false);
+      return;
+    }
+
+    // Check offline pincode DB for immediate feedback
+    if (PINCODE_DATABASE[clean]) {
+      const pinObj = {
+        name: cleanseLocationName(PINCODE_DATABASE[clean].name),
+        locality: PINCODE_DATABASE[clean].tag || PINCODE_DATABASE[clean].name,
+        district: PINCODE_DATABASE[clean].district,
+        lat: PINCODE_DATABASE[clean].lat,
+        lng: PINCODE_DATABASE[clean].lng,
+        pincode: clean,
+        isEstimated: false
+      };
+      setSearchResults([pinObj]);
+      setResolvedPreview(pinObj);
+    }
+
+    const timer = setTimeout(async () => {
+      setIsSearching(true);
+      try {
+        const backendUrl = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+        const resp = await fetch(`${backendUrl}/geocode?query=${encodeURIComponent(clean)}`);
+        if (resp.ok) {
+          const data = await resp.json();
+          if (data && data.results && data.results.length > 0) {
+            setSearchResults(data.results.map(r => ({
+              ...r,
+              name: cleanseLocationName(r.name)
+            })));
+            setShowDropdown(true);
+          } else if (data && data.success) {
+            setSearchResults([{
+              name: cleanseLocationName(data.name),
+              locality: data.district,
+              district: data.district,
+              lat: data.lat,
+              lng: data.lng,
+              isEstimated: data.isEstimated
+            }]);
+            setShowDropdown(true);
+          }
+        }
+      } catch (err) {
+        console.warn("Autocomplete search failed:", err);
+      } finally {
+        setIsSearching(false);
+      }
+    }, 300);
+
+    return () => clearTimeout(timer);
+  }, [searchInput]);
 
   if (!isOpen) return null;
 
-  const handlePincodeChange = (e) => {
-    const val = e.target.value.replace(/\D/g, '').slice(0, 6);
-    setPincodeInput(val);
-    if (val.length === 6) {
-      const res = resolvePincode(val);
-      setResolvedPreview(res);
-    } else {
-      setResolvedPreview(null);
-    }
+  const handleSelectResult = (item) => {
+    isSelectingRef.current = true;
+    const cleanName = cleanseLocationName(item.name);
+    const cleanedItem = { ...item, name: cleanName };
+    setSelectedLocation(cleanedItem);
+    setSearchInput(cleanName);
+    setResolvedPreview(cleanedItem);
+    setSearchResults([]);
+    setShowDropdown(false);
   };
 
   const handlePresetClick = (preset) => {
-    setPincodeInput(preset.pin);
-    const res = resolvePincode(preset.pin);
-    setResolvedPreview(res);
+    isSelectingRef.current = true;
+    const cleanName = cleanseLocationName(preset.name);
+    setSearchInput(cleanName);
+    const item = {
+      name: cleanName,
+      locality: preset.tag || cleanName,
+      district: preset.district,
+      lat: preset.lat,
+      lng: preset.lng,
+      pincode: preset.pin,
+      isEstimated: false
+    };
+    setSelectedLocation(item);
+    setResolvedPreview(item);
+    setSearchResults([]);
+    setShowDropdown(false);
   };
 
   const handleApply = () => {
     if (activeTab === 'gps') {
-      onSelectGPS();
+      if (gpsData && gpsData.lat && gpsData.lng) {
+        onSelectManual('', { isFamilyBooking: false, beneficiaryName: '' }, {
+          mode: 'gps',
+          label: `Live GPS (${gpsData.name})`,
+          name: gpsData.name,
+          lat: gpsData.lat,
+          lng: gpsData.lng,
+          status: 'acquired',
+          isFamilyBooking: false
+        });
+      } else {
+        onSelectGPS();
+      }
       onClose();
     } else {
-      const targetPin = pincodeInput || '572101';
-      onSelectManual(targetPin, {
+      const locationItem = selectedLocation || resolvedPreview || resolvePincode(searchInput || '572101');
+      onSelectManual(locationItem.pincode || locationItem.name, {
         isFamilyBooking,
         beneficiaryName: beneficiaryName.trim()
-      });
+      }, locationItem);
       onClose();
     }
   };
@@ -131,7 +319,7 @@ export const LocationOriginSelector = ({
                 </div>
                 <div className="space-y-1">
                   <p className="text-sm font-bold text-slate-900 dark:text-white">
-                    Auto-Track Device Location
+                    Live Device Geolocation (Mode A)
                   </p>
                   <p className="text-xs text-slate-600 dark:text-slate-400 leading-relaxed">
                     Continuously calculates real-time commute distance to Shridevi Hospital from your smartphone / browser GPS.
@@ -139,19 +327,57 @@ export const LocationOriginSelector = ({
                 </div>
               </div>
 
-              {isLocating ? (
-                <div className="flex items-center gap-2 text-xs text-blue-600 dark:text-blue-400 font-medium">
-                  <span className="w-2 h-2 rounded-full bg-blue-500 animate-ping" />
-                  Acquiring live satellite coordinates...
+              {isDetectingGPS || isLocating ? (
+                <div className="flex items-center gap-2 text-xs text-blue-600 dark:text-blue-400 font-medium p-2.5 bg-white/70 dark:bg-slate-900/70 rounded-xl border border-blue-200 dark:border-blue-800">
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  Acquiring live satellite coordinates (fresh fix)...
+                </div>
+              ) : (gpsData?.lat && gpsData?.lng) || (currentLocation?.lat && currentLocation?.lng) ? (
+                <div className="space-y-2">
+                  <div className="text-[11px] font-mono text-slate-700 dark:text-slate-300 bg-white/90 dark:bg-slate-900/90 px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-800 flex items-center justify-between">
+                    <div>
+                      <span className="font-bold text-slate-900 dark:text-white block">
+                        {gpsData?.name || currentLocation?.name || 'Live Location'}
+                      </span>
+                      <span className="text-[10px] text-slate-500 font-mono">
+                        Lat: {Number(gpsData?.lat || currentLocation?.lat).toFixed(4)} | Lng: {Number(gpsData?.lng || currentLocation?.lng).toFixed(4)}
+                      </span>
+                    </div>
+                    <span className="w-2 h-2 rounded-full bg-emerald-500 animate-ping shrink-0" />
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleRedetectGPS}
+                    className="w-full py-2 bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-bold text-blue-600 dark:text-blue-400 transition-all flex items-center justify-center gap-1.5 shadow-sm"
+                  >
+                    <Navigation className="w-3.5 h-3.5" /> Re-detect Live Location
+                  </button>
                 </div>
               ) : (
-                <div className="text-[11px] font-mono text-slate-500 dark:text-slate-400 bg-white/80 dark:bg-slate-900/80 px-3 py-1.5 rounded-lg border border-slate-200 dark:border-slate-800">
-                  Lat: {currentLocation?.lat || 13.340881} | Lng: {currentLocation?.lng || 77.100601}
+                <div className="space-y-2">
+                  <div className="text-[11px] font-mono text-slate-500 dark:text-slate-400 bg-white/90 dark:bg-slate-900/90 px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-800 flex items-center justify-between">
+                    <div>
+                      <span className="font-bold text-slate-700 dark:text-slate-300 block">
+                        No GPS Location Detected. Click 'Re-detect Live Location' below.
+                      </span>
+                      <span className="text-[10px] text-slate-400 font-mono">
+                        Lat: -- | Lng: --
+                      </span>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleRedetectGPS}
+                    className="w-full py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold shadow-md shadow-blue-500/20 transition-all flex items-center justify-center gap-2 active:scale-95"
+                  >
+                    <Navigation className="w-4 h-4" /> Re-detect Live Location
+                  </button>
                 </div>
               )}
             </div>
           </div>
         )}
+
 
         {/* Tab 2: Manual / Family Pincode Mode */}
         {activeTab === 'manual' && (
@@ -197,21 +423,56 @@ export const LocationOriginSelector = ({
               </div>
             )}
 
-            {/* Pincode Search Input */}
-            <div className="space-y-1.5">
+            {/* Live Autocomplete Search Input */}
+            <div className="space-y-1.5 relative" ref={dropdownRef}>
               <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300">
-                Origin Postal Pincode (6-Digits)
+                Origin Place Name or 6-Digit PIN Code
               </label>
               <div className="relative">
                 <Search className="w-4 h-4 absolute left-3 top-2.5 text-slate-400" />
                 <input
                   type="text"
-                  value={pincodeInput}
-                  onChange={handlePincodeChange}
-                  placeholder="e.g. 572137 (Sira), 572216 (Gubbi)"
-                  className="w-full pl-9 pr-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 font-mono"
+                  value={searchInput}
+                  onChange={(e) => {
+                    setSearchInput(e.target.value);
+                    setShowDropdown(true);
+                  }}
+                  onFocus={() => {
+                    if (searchResults.length > 0) setShowDropdown(true);
+                  }}
+                  placeholder="Type PIN (572137) or place (Davanagere, Sira, Peenya)..."
+                  className="w-full pl-9 pr-8 py-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
                 />
+                {isSearching && (
+                  <Loader2 className="w-4 h-4 absolute right-3 top-2.5 text-blue-500 animate-spin" />
+                )}
               </div>
+
+              {/* Dynamic Autocomplete Suggestions Dropdown */}
+              {showDropdown && searchResults.length > 0 && (
+                <div className="absolute left-0 right-0 top-full mt-1.5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl shadow-xl overflow-hidden z-50 max-h-56 overflow-y-auto divide-y divide-slate-100 dark:divide-slate-700/50">
+                  {searchResults.map((item, idx) => (
+                    <button
+                      key={idx}
+                      type="button"
+                      onClick={() => handleSelectResult(item)}
+                      className="w-full text-left px-3.5 py-2.5 hover:bg-blue-50 dark:hover:bg-slate-700/70 transition-colors flex items-center justify-between gap-2"
+                    >
+                      <div className="truncate">
+                        <p className="text-xs font-bold text-slate-900 dark:text-white truncate">
+                          {item.name}
+                        </p>
+                        <p className="text-[10px] text-slate-500 dark:text-slate-400">
+                          {item.district} District • Coordinates: {Number(item.lat).toFixed(4)}, {Number(item.lng).toFixed(4)}
+                        </p>
+                      </div>
+                      <span className="text-[10px] font-bold text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-950/60 px-2 py-0.5 rounded-md shrink-0">
+                        Select
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
 
             {/* Resolved Location Preview Box */}
@@ -226,7 +487,7 @@ export const LocationOriginSelector = ({
                       {resolvedPreview.name}
                     </p>
                     <p className="text-[10px] text-emerald-700 dark:text-emerald-400">
-                      {resolvedPreview.district} District • Coordinates: {resolvedPreview.lat}, {resolvedPreview.lng}
+                      {resolvedPreview.district} District • Coordinates: {Number(resolvedPreview.lat).toFixed(4)}, {Number(resolvedPreview.lng).toFixed(4)}
                     </p>
                   </div>
                 </div>
@@ -243,7 +504,7 @@ export const LocationOriginSelector = ({
               </p>
               <div className="flex flex-wrap gap-1.5">
                 {LOCATION_PRESETS.map((preset) => {
-                  const isSelected = pincodeInput === preset.pin;
+                  const isSelected = searchInput === preset.pin || searchInput === preset.name;
                   return (
                     <button
                       key={preset.id}
@@ -291,3 +552,4 @@ export const LocationOriginSelector = ({
 };
 
 export default LocationOriginSelector;
+

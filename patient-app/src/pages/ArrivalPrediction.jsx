@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQueue } from '../context/QueueContext';
 import { useAuth } from '../context/AuthContext';
@@ -6,7 +6,7 @@ import { queueService } from '../services/queueService';
 import { patientService } from '../services/patientService';
 import { notificationService } from '../services/notificationService';
 import { useLocationResolver } from '../hooks/useLocationResolver';
-import { LOCATION_PRESETS, resolvePincode } from '../utils/locationResolver';
+import { LOCATION_PRESETS, resolvePincode, PINCODE_DATABASE } from '../utils/locationResolver';
 import { TopBar } from '../components/TopBar';
 import { Button } from '../components/Button';
 import MobileDispatchModal from '../components/MobileDispatchModal';
@@ -39,7 +39,8 @@ import {
   Trash2,
   Calendar,
   CalendarX,
-  PlusCircle
+  PlusCircle,
+  Loader2
 } from 'lucide-react';
 import { motion } from 'framer-motion';
 
@@ -53,13 +54,19 @@ export const ArrivalPrediction = () => {
   const {
     locationState,
     coords,
+    hasCoords,
     mode,
     isGPS,
     isFamilyBooking,
     label: locationLabel,
     isLocating,
+    gpsError,
+    gpsErrorCode,
+    isPermissionBlocked,
     setLiveGPSMode,
     setManualLocationByPincode,
+    setManualLocationCustom,
+    detectLiveLocation,
     refreshGPS
   } = useLocationResolver();
 
@@ -75,53 +82,140 @@ export const ArrivalPrediction = () => {
   const [cancelToast, setCancelToast] = useState(null);
   const [isCancelled, setIsCancelled] = useState(user?.status === 'cancelled');
 
-  // In-card Pincode & Beneficiary State for Family Mode
-  const [customPincode, setCustomPincode] = useState(locationState?.pincode || '');
+  // In-card Pincode & Beneficiary State for Mode B
+  const [customSearchQuery, setCustomSearchQuery] = useState(locationState?.pincode || locationState?.name || '');
   const [beneficiaryInput, setBeneficiaryInput] = useState(locationState?.beneficiaryName || '');
+  const [cardSearchResults, setCardSearchResults] = useState([]);
+  const [isCardSearching, setIsCardSearching] = useState(false);
+  const [showCardDropdown, setShowCardDropdown] = useState(false);
+  const cardDropdownRef = useRef(null);
 
   // Mobile dispatch simulator state
   const [isDispatchModalOpen, setIsDispatchModalOpen] = useState(false);
   const [dispatchData, setDispatchData] = useState(null);
   const [isDispatchLoading, setIsDispatchLoading] = useState(false);
 
+  // Calculate time remaining until departure taking into account scheduled slot or live queue
+  const calculateSecondsToDeparture = useCallback((resData) => {
+    const travelMins = typeof resData?.travel_time_minutes === 'number'
+      ? resData.travel_time_minutes
+      : (queueState.trafficDurationMinutes || 15);
+    const bufferMins = 15; // 15-minute buffer requirement
+
+    // Check if appointment has a specific future date and time slot
+    const rawDate = user?.appointmentDate || user?.date;
+    const rawTime = user?.timeSlot || user?.appointmentTime;
+
+    if (rawTime) {
+      let hours = 0;
+      let minutes = 0;
+      const timeMatch = String(rawTime).match(/(\d+):(\d+)\s*(AM|PM)?/i);
+      if (timeMatch) {
+        hours = parseInt(timeMatch[1], 10);
+        minutes = parseInt(timeMatch[2], 10);
+        const meridiem = timeMatch[3] ? timeMatch[3].toUpperCase() : null;
+        if (meridiem === 'PM' && hours < 12) hours += 12;
+        if (meridiem === 'AM' && hours === 12) hours = 0;
+
+        const targetSlot = new Date();
+        if (rawDate && rawDate !== "Today") {
+          const parsed = new Date(rawDate);
+          if (!isNaN(parsed.getTime())) {
+            targetSlot.setFullYear(parsed.getFullYear(), parsed.getMonth(), parsed.getDate());
+          }
+        }
+        targetSlot.setHours(hours, minutes, 0, 0);
+
+        const now = new Date();
+        // If scheduled for a future slot (e.g., later today or tomorrow)
+        if (targetSlot.getTime() > now.getTime()) {
+          const targetArrivalMs = targetSlot.getTime() - (bufferMins * 60 * 1000);
+          const optimalLeaveMs = targetArrivalMs - (travelMins * 60 * 1000);
+          const diffSecs = Math.floor((optimalLeaveMs - now.getTime()) / 1000);
+          return Math.max(0, diffSecs);
+        }
+      }
+    }
+
+    // Default to live queue prediction if walk-in or slot is right now
+    const predictedWait = typeof resData?.predicted_wait_minutes === 'number'
+      ? resData.predicted_wait_minutes
+      : (queueState.estimatedWaitMinutes || 35);
+    const minutesUntilDeparture = predictedWait - (travelMins + bufferMins);
+
+    if (resData?.should_leave_now || minutesUntilDeparture <= 0) {
+      return 0;
+    }
+    return Math.max(0, Math.round(minutesUntilDeparture * 60));
+  }, [user, queueState.estimatedWaitMinutes, queueState.trafficDurationMinutes]);
+
+  const prevCoordsRef = useRef({ lat: null, lng: null });
+  const isFetchingRef = useRef(false);
+
   // Fetch real departure prediction from FastAPI backend based on active resolved coordinates
-  const fetchPrediction = useCallback(async () => {
+  const fetchPrediction = useCallback(async (forced = false) => {
     if (isCancelled || user?.status === 'cancelled') {
       setIsLoading(false);
       return;
     }
+
+    const currentLat = coords?.lat;
+    const currentLng = coords?.lng;
+
+    // Do NOT call departure-check if coordinates have not been acquired yet
+    if (!currentLat || !currentLng) {
+      setDepartureData(null);
+      setSecondsLeft(0);
+      setIsLoading(false);
+      return;
+    }
+
+    // Check if coordinates actually changed unless forced
+    if (
+      !forced &&
+      prevCoordsRef.current.lat === currentLat &&
+      prevCoordsRef.current.lng === currentLng
+    ) {
+      return;
+    }
+
+    if (isFetchingRef.current) return;
+    isFetchingRef.current = true;
+    prevCoordsRef.current = { lat: currentLat, lng: currentLng };
+
     setIsLoading(true);
     try {
       const apptId = user?.appointment_id || user?.appointmentId || 0;
-      const res = await queueService.checkDeparture(apptId, coords.lat, coords.lng);
+      const res = await queueService.checkDeparture(apptId, currentLat, currentLng);
       setDepartureData(res);
-      
-      const predictedWait = typeof res?.predicted_wait_minutes === 'number' ? res.predicted_wait_minutes : (queueState.estimatedWaitMinutes || 35);
-      const travelMins = typeof res?.travel_time_minutes === 'number' ? res.travel_time_minutes : (queueState.trafficDurationMinutes || 15);
-      const bufferMins = 10;
-      const minutesUntilDeparture = predictedWait - (travelMins + bufferMins);
-
-      if (res?.should_leave_now || minutesUntilDeparture <= 0) {
-        setSecondsLeft(0);
-      } else {
-        setSecondsLeft(Math.max(0, Math.round(minutesUntilDeparture * 60)));
-      }
+      const remainingSecs = calculateSecondsToDeparture(res);
+      setSecondsLeft(remainingSecs);
     } catch (err) {
-      console.warn("Real /departure-check call failed, using fallback:", err.message);
+      console.warn("Departure check fallback active:", err.message);
     } finally {
       setIsLoading(false);
+      isFetchingRef.current = false;
     }
-  }, [user, coords.lat, coords.lng, isCancelled, queueState.estimatedWaitMinutes, queueState.trafficDurationMinutes]);
+  }, [user?.appointment_id, user?.appointmentId, user?.status, coords?.lat, coords?.lng, isCancelled, calculateSecondsToDeparture]);
 
-  // Initial load and periodic re-check every 30s or when coordinates change
+  // Synchronize metric cards and departure calculation immediately whenever location coordinates change
   useEffect(() => {
     if (isCancelled || user?.status === 'cancelled') return;
-    fetchPrediction();
-    const interval = setInterval(fetchPrediction, 30000);
+    if (coords?.lat && coords?.lng) {
+      fetchPrediction(true);
+    }
+  }, [coords?.lat, coords?.lng, isCancelled, user?.status]);
+
+  // Periodic background re-check every 60 seconds (non-hammering)
+  useEffect(() => {
+    if (isCancelled || user?.status === 'cancelled') return;
+    const interval = setInterval(() => {
+      fetchPrediction(true);
+    }, 60000);
     return () => clearInterval(interval);
   }, [fetchPrediction, isCancelled, user?.status]);
 
-  // Departure Countdown
+  // Departure Countdown Timer Tick
   useEffect(() => {
     if (secondsLeft <= 0 || isDeparted || isCancelled || user?.status === 'cancelled') return;
     const interval = setInterval(() => {
@@ -130,16 +224,112 @@ export const ArrivalPrediction = () => {
     return () => clearInterval(interval);
   }, [secondsLeft, isDeparted, isCancelled, user?.status]);
 
-  const formatCountdown = (totalSecs) => {
-    const mins = Math.floor(totalSecs / 60);
+  // Debounced search for In-Card Mode B search input
+  useEffect(() => {
+    const clean = customSearchQuery.trim();
+    if (!clean || clean.length < 2) {
+      setCardSearchResults([]);
+      setIsCardSearching(false);
+      return;
+    }
+
+    if (PINCODE_DATABASE[clean]) {
+      const pinObj = {
+        name: PINCODE_DATABASE[clean].name,
+        locality: PINCODE_DATABASE[clean].tag || PINCODE_DATABASE[clean].name,
+        district: PINCODE_DATABASE[clean].district,
+        lat: PINCODE_DATABASE[clean].lat,
+        lng: PINCODE_DATABASE[clean].lng,
+        pincode: clean,
+        isEstimated: false
+      };
+      setCardSearchResults([pinObj]);
+    }
+
+    const timer = setTimeout(async () => {
+      setIsCardSearching(true);
+      try {
+        const backendUrl = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+        const resp = await fetch(`${backendUrl}/geocode?query=${encodeURIComponent(clean)}`);
+        if (resp.ok) {
+          const data = await resp.json();
+          if (data && data.results && data.results.length > 0) {
+            setCardSearchResults(data.results);
+            setShowCardDropdown(true);
+          } else if (data && data.success) {
+            setCardSearchResults([{
+              name: data.name,
+              locality: data.district,
+              district: data.district,
+              lat: data.lat,
+              lng: data.lng,
+              isEstimated: data.isEstimated
+            }]);
+            setShowCardDropdown(true);
+          }
+        }
+      } catch (err) {
+        console.warn("Card autocomplete search failed:", err);
+      } finally {
+        setIsCardSearching(false);
+      }
+    }, 300);
+
+    return () => clearTimeout(timer);
+  }, [customSearchQuery]);
+
+  // Format countdown string supporting days, hours, MM:SS and immediate departure
+  const formatCountdownInfo = (totalSecs) => {
+    if (!coords) {
+      return {
+        timeFormatted: "--:--",
+        badgeText: "📍 Set Starting Point",
+        isImmediate: false,
+        description: "Detect live device GPS or select your town in Mode B to calculate travel time."
+      };
+    }
+
+    if (totalSecs <= 0 || (departureData?.should_leave_now && !isDeparted)) {
+      return {
+        timeFormatted: "00:00",
+        badgeText: "🚨 LEAVE NOW FOR HOSPITAL",
+        isImmediate: true,
+        description: "Your commute time matches or exceeds your reporting buffer. Depart immediately!"
+      };
+    }
+
+    const days = Math.floor(totalSecs / 86400);
+    const hours = Math.floor((totalSecs % 86400) / 3600);
+    const mins = Math.floor((totalSecs % 3600) / 60);
     const secs = totalSecs % 60;
-    return `${mins < 10 ? '0' : ''}${mins}:${secs < 10 ? '0' : ''}${secs}`;
+
+    if (days >= 1) {
+      return {
+        timeFormatted: `${days}d ${hours}h`,
+        badgeText: `${days} ${days === 1 ? 'Day' : 'Days'}, ${hours} ${hours === 1 ? 'Hour' : 'Hours'} left`,
+        isImmediate: false,
+        description: `Appointment scheduled in advance. Commute time: ~${departureData?.travel_time_minutes || 15} mins.`
+      };
+    }
+    if (hours >= 1) {
+      return {
+        timeFormatted: `${hours}h ${mins}m`,
+        badgeText: `${hours} ${hours === 1 ? 'Hour' : 'Hours'}, ${mins} Mins left`,
+        isImmediate: false,
+        description: `Optimal departure sync based on scheduled time and live traffic.`
+      };
+    }
+
+    const mmss = `${mins < 10 ? '0' : ''}${mins}:${secs < 10 ? '0' : ''}${secs}`;
+    return {
+      timeFormatted: mmss,
+      badgeText: `${mmss} left`,
+      isImmediate: false,
+      description: "Leaving at this exact moment ensures you arrive 15 mins before consultation."
+    };
   };
 
-  const handleLeaveNow = () => {
-    setIsDeparted(true);
-  };
-
+  const countdownInfo = formatCountdownInfo(secondsLeft);
   const shouldLeaveNow = departureData?.should_leave_now || (secondsLeft <= 0 && departureData !== null && !isDeparted);
 
   // Format date helper for the TIME SLOT card
@@ -184,25 +374,33 @@ export const ArrivalPrediction = () => {
     }
   };
 
-  // Handle Preset Click in Family Mode
-  const handlePresetSelect = (preset) => {
-    setCustomPincode(preset.pin);
-    setManualLocationByPincode(preset.pin, {
+  // Handle in-card selection from search dropdown
+  const handleSelectCardResult = (item) => {
+    setCustomSearchQuery(item.name);
+    setShowCardDropdown(false);
+    setManualLocationCustom(item, {
       isFamilyBooking: true,
-      beneficiaryName: beneficiaryInput.trim() || 'Family Relative'
+      beneficiaryName: beneficiaryInput.trim() || 'Family Member'
     });
   };
 
-  // Handle manual 6-digit Pincode input
-  const handlePincodeChange = (e) => {
-    const val = e.target.value.replace(/\D/g, '').slice(0, 6);
-    setCustomPincode(val);
-    if (val.length === 6) {
-      setManualLocationByPincode(val, {
-        isFamilyBooking: true,
-        beneficiaryName: beneficiaryInput.trim() || 'Family Relative'
-      });
-    }
+  // Handle Preset Click in Mode B
+  const handlePresetSelect = (preset) => {
+    setCustomSearchQuery(preset.name);
+    setShowCardDropdown(false);
+    const item = {
+      name: preset.name,
+      locality: preset.tag || preset.name,
+      district: preset.district,
+      lat: preset.lat,
+      lng: preset.lng,
+      pincode: preset.pin,
+      isEstimated: false
+    };
+    setManualLocationCustom(item, {
+      isFamilyBooking: true,
+      beneficiaryName: beneficiaryInput.trim() || 'Family Relative'
+    });
   };
 
   // Prepare and open Dual WhatsApp & SMS Dispatch Modal
@@ -219,8 +417,8 @@ export const ArrivalPrediction = () => {
         doctor_name: user?.doctor || queueState.doctorName || "Dr. Rajeswari R.",
         room_number: user?.roomNo || "Room 204",
         travel_time_minutes: travelMins,
-        buffer_minutes: 10,
-        total_travel_needed_minutes: travelMins + 10,
+        buffer_minutes: 15,
+        total_travel_needed_minutes: travelMins + 15,
         estimated_wait_minutes: waitMins,
         should_leave_now: Boolean(shouldLeaveNow),
         origin_address: locationState?.name || "Tumakuru City",
@@ -418,7 +616,7 @@ export const ArrivalPrediction = () => {
             <button
               onClick={() => {
                 if (isGPS) {
-                  setManualLocationByPincode(customPincode || '572101', {
+                  setManualLocationByPincode('572101', {
                     isFamilyBooking: true,
                     beneficiaryName: beneficiaryInput.trim() || 'Family Member'
                   });
@@ -439,46 +637,185 @@ export const ArrivalPrediction = () => {
         {/* Mode-Specific Controls */}
         {isGPS ? (
           /* Mode A: Live GPS Content */
-          <div className="p-4 rounded-2xl bg-blue-50/60 dark:bg-blue-950/30 border border-blue-200/60 dark:border-blue-800/60 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-xs">
-            <div className="flex items-center gap-3">
-              <div className="w-9 h-9 rounded-xl bg-blue-600 text-white flex items-center justify-center shrink-0 shadow-md shadow-blue-500/20">
-                <Navigation className="w-4 h-4 animate-pulse" />
+          <div className="space-y-3">
+            {/* Case 1: Permission Denied or Error */}
+            {isPermissionBlocked || gpsError ? (
+              <div className="p-4 rounded-2xl bg-amber-50 dark:bg-amber-950/40 border border-amber-300 dark:border-amber-800/80 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-xs">
+                <div className="flex items-center gap-3">
+                  <div className="w-9 h-9 rounded-xl bg-amber-600 text-white flex items-center justify-center shrink-0 shadow-md">
+                    <AlertTriangle className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <p className="font-bold text-amber-900 dark:text-amber-200">
+                      📍 Location Permission Blocked
+                    </p>
+                    <p className="text-[11px] text-amber-700 dark:text-amber-300 mt-0.5">
+                      {gpsError || "⚠️ Location permission is blocked in your browser. Switch to Mode B to search your village/city manually."}
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setManualLocationByPincode('572101', {
+                      isFamilyBooking: false,
+                      beneficiaryName: ''
+                    });
+                  }}
+                  className="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-xl font-bold shadow-md shadow-purple-500/20 transition-all flex items-center gap-1.5 shrink-0 active:scale-95"
+                >
+                  <Users className="w-3.5 h-3.5" /> Switch to Mode B (Manual Search)
+                </button>
               </div>
-              <div>
-                <p className="font-bold text-slate-900 dark:text-white flex items-center gap-1.5">
-                  <span>Live Satellite Geolocation Active</span>
-                  <span className="w-2 h-2 rounded-full bg-emerald-500 animate-ping" />
-                </p>
-                <p className="text-[11px] text-slate-500 dark:text-slate-400">
-                  Auto-resolving real-time device coordinates to Shridevi Hospital (Sira Road).
-                </p>
-              </div>
-            </div>
+            ) : !coords ? (
+              /* Case 2: Prompt Needed (No Coords Yet - Action Button) */
+              <div className="p-4 rounded-2xl bg-blue-50/70 dark:bg-blue-950/40 border border-blue-200 dark:border-blue-800/80 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-xs">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-2xl bg-blue-600 text-white flex items-center justify-center shrink-0 shadow-md shadow-blue-500/25">
+                    <Navigation className="w-5 h-5 animate-pulse" />
+                  </div>
+                  <div>
+                    <p className="font-bold text-slate-900 dark:text-white text-sm">
+                      Live Device Location Not Detected
+                    </p>
+                    <p className="text-[11px] text-slate-600 dark:text-slate-400 mt-0.5">
+                      Click below to acquire real-time GPS coordinates for accurate travel and departure calculations.
+                    </p>
+                  </div>
+                </div>
 
-            <button
-              onClick={refreshGPS}
-              disabled={isLocating}
-              className="px-3.5 py-1.5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-blue-600 dark:text-blue-400 font-bold hover:bg-blue-50 dark:hover:bg-slate-700 transition-all shadow-sm flex items-center gap-1.5 shrink-0"
-            >
-              <RefreshCw className={`w-3.5 h-3.5 ${isLocating ? 'animate-spin' : ''}`} />
-              {isLocating ? 'Acquiring GPS...' : 'Refresh GPS'}
-            </button>
+                <button
+                  type="button"
+                  onClick={detectLiveLocation}
+                  disabled={isLocating}
+                  className="px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-bold shadow-lg shadow-blue-500/25 transition-all flex items-center gap-2 shrink-0 active:scale-95"
+                >
+                  {isLocating ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      Acquiring Real GPS...
+                    </>
+                  ) : (
+                    <>
+                      <Navigation className="w-4 h-4" />
+                      📍 Enable Device GPS Location
+                    </>
+                  )}
+                </button>
+              </div>
+            ) : (
+              /* Case 3: Live GPS Coordinates Acquired */
+              <div className="space-y-2">
+                <div className="p-4 rounded-2xl bg-blue-50/60 dark:bg-blue-950/30 border border-blue-200/60 dark:border-blue-800/60 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-xs">
+                  <div className="flex items-center gap-3">
+                    <div className="w-9 h-9 rounded-xl bg-blue-600 text-white flex items-center justify-center shrink-0 shadow-md shadow-blue-500/20">
+                      <Navigation className="w-4 h-4 animate-pulse" />
+                    </div>
+                    <div>
+                      <p className="font-bold text-slate-900 dark:text-white flex items-center gap-1.5">
+                        <span>Live Satellite Geolocation Active</span>
+                        <span className="w-2 h-2 rounded-full bg-emerald-500 animate-ping" />
+                      </p>
+                      <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                        Resolved: <strong className="text-slate-800 dark:text-slate-200">{locationState?.name || 'Device Location'}</strong>
+                      </p>
+                    </div>
+                  </div>
+
+                  <button
+                    onClick={detectLiveLocation}
+                    disabled={isLocating}
+                    className="px-3.5 py-1.5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-blue-600 dark:text-blue-400 font-bold hover:bg-blue-50 dark:hover:bg-slate-700 transition-all shadow-sm flex items-center gap-1.5 shrink-0"
+                  >
+                    <RefreshCw className={`w-3.5 h-3.5 ${isLocating ? 'animate-spin' : ''}`} />
+                    {isLocating ? 'Acquiring GPS...' : 'Re-detect Location'}
+                  </button>
+                </div>
+
+                {/* Fast Preset Override for Dev / Remote Patient */}
+                <div className="flex flex-wrap items-center gap-2 pt-1 px-1">
+                  <span className="text-[10px] text-slate-400 font-medium">Quick Override / Remote:</span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setManualLocationByPincode('577002', { isFamilyBooking: false });
+                    }}
+                    className="px-2.5 py-1 rounded-lg bg-purple-50 dark:bg-purple-950/40 border border-purple-200 dark:border-purple-800 text-[11px] font-bold text-purple-700 dark:text-purple-300 hover:bg-purple-100 dark:hover:bg-purple-900/60 transition-colors flex items-center gap-1"
+                  >
+                    📍 Davanagere City (193 km / ~140m)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setManualLocationByPincode('560023', { isFamilyBooking: false });
+                    }}
+                    className="px-2.5 py-1 rounded-lg bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-[11px] font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors"
+                  >
+                    Bengaluru Majestic
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setManualLocationByPincode('572106', { isFamilyBooking: false });
+                    }}
+                    className="px-2.5 py-1 rounded-lg bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-[11px] font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors"
+                  >
+                    SIET Campus (~2m)
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         ) : (
           /* Mode B: Family / Remote Patient Locality & Presets Content */
           <div className="space-y-4 pt-1">
             <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
-              {/* 6-Digit Pincode Input */}
-              <div className="relative flex-1">
+              
+              {/* Dynamic Autocomplete Search Input */}
+              <div className="relative flex-1" ref={cardDropdownRef}>
                 <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
                 <input
                   type="text"
-                  maxLength={6}
-                  value={customPincode}
-                  onChange={handlePincodeChange}
-                  placeholder="Enter 6-digit Karnataka PIN (e.g., 572137, 572216)..."
-                  className="w-full pl-10 pr-4 py-2.5 bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 rounded-2xl text-xs font-semibold text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-purple-500 transition-all"
+                  value={customSearchQuery}
+                  onChange={(e) => {
+                    setCustomSearchQuery(e.target.value);
+                    setShowCardDropdown(true);
+                  }}
+                  onFocus={() => {
+                    if (cardSearchResults.length > 0) setShowCardDropdown(true);
+                  }}
+                  placeholder="Enter 6-digit PIN (e.g. 572137) or place name (Davanagere, Sira)..."
+                  className="w-full pl-10 pr-9 py-2.5 bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 rounded-2xl text-xs font-semibold text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-purple-500 transition-all"
                 />
+                {isCardSearching && (
+                  <Loader2 className="w-4 h-4 absolute right-3 top-1/2 -translate-y-1/2 text-purple-500 animate-spin" />
+                )}
+
+                {/* Suggestions Dropdown */}
+                {showCardDropdown && cardSearchResults.length > 0 && (
+                  <div className="absolute left-0 right-0 top-full mt-1 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl shadow-xl overflow-hidden z-40 max-h-52 overflow-y-auto divide-y divide-slate-100 dark:divide-slate-700/50">
+                    {cardSearchResults.map((item, idx) => (
+                      <button
+                        key={idx}
+                        type="button"
+                        onClick={() => handleSelectCardResult(item)}
+                        className="w-full text-left px-3.5 py-2 hover:bg-purple-50 dark:hover:bg-slate-700/70 transition-colors flex items-center justify-between gap-2"
+                      >
+                        <div className="truncate">
+                          <p className="text-xs font-bold text-slate-900 dark:text-white truncate">
+                            {item.name}
+                          </p>
+                          <p className="text-[10px] text-slate-500 dark:text-slate-400">
+                            {item.district} District • {Number(item.lat).toFixed(4)}, {Number(item.lng).toFixed(4)}
+                          </p>
+                        </div>
+                        <span className="text-[10px] font-bold text-purple-600 dark:text-purple-400 bg-purple-50 dark:bg-purple-950/60 px-2 py-0.5 rounded-md shrink-0">
+                          Select
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                )}
               </div>
 
               {/* Beneficiary Name Input */}
@@ -489,8 +826,8 @@ export const ArrivalPrediction = () => {
                   value={beneficiaryInput}
                   onChange={(e) => {
                     setBeneficiaryInput(e.target.value);
-                    if (locationState.pincode) {
-                      setManualLocationByPincode(locationState.pincode, {
+                    if (locationState.name) {
+                      setManualLocationCustom(locationState, {
                         isFamilyBooking: true,
                         beneficiaryName: e.target.value
                       });
@@ -509,7 +846,7 @@ export const ArrivalPrediction = () => {
               </span>
               <div className="flex flex-wrap gap-2">
                 {LOCATION_PRESETS.map((preset) => {
-                  const isSelected = !isGPS && locationState?.pincode === preset.pin;
+                  const isSelected = !isGPS && (locationState?.pincode === preset.pin || locationState?.name === preset.name);
                   return (
                     <button
                       key={preset.id}
@@ -540,7 +877,8 @@ export const ArrivalPrediction = () => {
             <MapPin className="w-4 h-4 text-blue-600 dark:text-blue-400 shrink-0" />
             <span className="font-bold text-slate-900 dark:text-white">
               {(() => {
-                const originName = locationState?.name || locationLabel || "Tumakuru";
+                if (!coords || !locationState?.lat) return "📍 Origin: No Location Selected (Enable GPS or Search in Mode B)";
+                const originName = locationState?.name || locationLabel || "Selected Origin";
                 const pin = locationState?.pincode;
                 const hasPin = pin && originName.includes(pin);
                 const displayOrigin = hasPin ? originName : `${originName}${pin ? ` (${pin})` : ''}`;
@@ -550,7 +888,7 @@ export const ArrivalPrediction = () => {
           </div>
           <div className="flex items-center gap-2 text-[11px] text-slate-500 dark:text-slate-400">
             <span className="font-mono bg-white/80 dark:bg-slate-800/80 px-2 py-0.5 rounded-md border border-slate-200 dark:border-slate-700">
-              {coords.lat}, {coords.lng}
+              {coords ? `${Number(coords.lat).toFixed(4)}, ${Number(coords.lng).toFixed(4)}` : 'Coords: None'}
             </span>
             <span>➔ Shridevi Hospital</span>
           </div>
@@ -596,8 +934,8 @@ export const ArrivalPrediction = () => {
           <div className="flex items-center gap-2">
             <button
               onClick={fetchPrediction}
-              disabled={isLoading}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-200 transition-colors"
+              disabled={isLoading || !coords}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-200 transition-colors disabled:opacity-50"
             >
               <RefreshCw className={`w-3.5 h-3.5 ${isLoading ? 'animate-spin' : ''}`} /> Sync Live
             </button>
@@ -606,7 +944,7 @@ export const ArrivalPrediction = () => {
                 ? 'bg-rose-50 dark:bg-rose-950/60 border-rose-500/40 text-rose-600 dark:text-rose-400'
                 : 'bg-cyan-50 dark:bg-cyan-950/60 border-cyan-500/30 text-cyan-600 dark:text-cyan-400'
             }`}>
-              <Radio className="w-4 h-4 animate-ping" /> {departureData?.trafficCondition || 'Live Route Active'}
+              <Radio className="w-4 h-4 animate-ping" /> {departureData?.trafficCondition || (coords ? 'Live Route Active' : 'Awaiting Location')}
             </div>
           </div>
         </div>
@@ -638,24 +976,20 @@ export const ArrivalPrediction = () => {
                     ? 'bg-rose-500/20 text-rose-400 border border-rose-500/30 animate-pulse'
                     : 'bg-cyan-500/20 text-cyan-400 border border-cyan-500/30'
                 }`}>
-                  {isDeparted ? 'En Route' : shouldLeaveNow ? '🚨 LEAVE NOW FOR HOSPITAL' : 'Optimal Sync'}
+                  {isDeparted ? 'En Route' : countdownInfo.badgeText}
                 </span>
               </div>
 
               <div className={`text-5xl sm:text-6xl font-black font-mono tracking-tight py-2 ${
                 shouldLeaveNow && !isDeparted ? 'text-rose-400 animate-pulse' : 'text-white'
               }`}>
-                {isDeparted ? 'EN ROUTE' : shouldLeaveNow ? '00:00' : formatCountdown(secondsLeft)}
+                {isDeparted ? 'EN ROUTE' : countdownInfo.timeFormatted}
               </div>
 
               <p className="text-xs text-slate-300">
                 {isDeparted
                   ? `Estimated Arrival at OPD Lounge: ${departureData?.estimatedArrivalTime || '10:42 AM'}`
-                  : shouldLeaveNow
-                  ? 'Your travel time matches or exceeds your predicted wait time (with 10-min safety buffer). Depart immediately!'
-                  : departureData?.message
-                  ? departureData.message
-                  : 'Leaving at this exact moment ensures you arrive 10 mins before Token Call.'}
+                  : countdownInfo.description}
               </p>
             </div>
 
@@ -674,7 +1008,7 @@ export const ArrivalPrediction = () => {
               <div className="p-3.5 bg-slate-50 dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 space-y-1">
                 <span className="text-slate-500 font-semibold flex items-center gap-1.5"><Car className="w-3.5 h-3.5 text-blue-500" /> Travel Duration</span>
                 <p className="text-xl font-bold text-slate-900 dark:text-white">
-                  {departureData?.travel_time_minutes ?? queueState.trafficDurationMinutes} Mins
+                  {coords ? (departureData?.travel_time_minutes ? `${departureData.travel_time_minutes} Mins` : 'Calculating...') : '-- Mins'}
                 </p>
                 <p className="text-[10px] text-emerald-500 font-semibold">Live ORS Driving Route</p>
               </div>
@@ -682,7 +1016,7 @@ export const ArrivalPrediction = () => {
               <div className="p-3.5 bg-slate-50 dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 space-y-1">
                 <span className="text-slate-500 font-semibold flex items-center gap-1.5"><Clock className="w-3.5 h-3.5 text-amber-500" /> OPD Queue Wait</span>
                 <p className="text-xl font-bold text-slate-900 dark:text-white">
-                  {departureData?.predicted_wait_minutes ?? queueState.estimatedWaitMinutes} Mins
+                  {coords ? `${departureData?.predicted_wait_minutes ?? queueState.estimatedWaitMinutes ?? 35} Mins` : `${queueState.estimatedWaitMinutes || 35} Mins`}
                 </p>
                 <p className="text-[10px] text-blue-500 font-semibold">{queueState.patientsAhead} Patients Ahead</p>
               </div>
@@ -690,7 +1024,7 @@ export const ArrivalPrediction = () => {
               <div className="p-3.5 bg-slate-50 dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 space-y-1">
                 <span className="text-slate-500 font-semibold flex items-center gap-1.5"><MapPin className="w-3.5 h-3.5 text-rose-500" /> Hospital Distance</span>
                 <p className="text-xl font-bold text-slate-900 dark:text-white">
-                  {departureData?.distanceKm ?? DEMO_PATIENT.distanceKm} Km
+                  {coords ? (departureData?.distanceKm ? `${departureData.distanceKm} Km` : 'Calculating...') : '-- Km'}
                 </p>
                 <p className="text-[10px] text-slate-400">SIET Sira Rd Corridor</p>
               </div>
@@ -710,13 +1044,13 @@ export const ArrivalPrediction = () => {
                     <Compass className="w-3.5 h-3.5 text-indigo-500" /> 🗺️ Transit Journey
                   </span>
                   <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-indigo-50 dark:bg-indigo-950 text-indigo-600 dark:text-indigo-400 border border-indigo-200 dark:border-indigo-800">
-                    {isGPS ? 'Mode A: Live GPS' : (locationState?.isFamilyBooking ? 'Mode B: Family Booking' : 'Mode B: Preset PIN')}
+                    {isGPS ? 'Mode A: Live GPS' : (locationState?.isFamilyBooking ? 'Mode B: Family Booking' : 'Mode B: Manual Origin')}
                   </span>
                 </div>
                 <div className="text-xs space-y-1">
                   <p className="font-bold text-slate-900 dark:text-white truncate flex items-center gap-1.5">
                     <span className="text-slate-400 font-normal shrink-0">From:</span>
-                    <span className="truncate">{locationState?.name || locationLabel || 'My Current Location'}</span>
+                    <span className="truncate">{coords ? (locationState?.name || locationLabel) : 'Waiting for location (Click "Detect My Live Location")'}</span>
                   </p>
                   <p className="font-bold text-slate-900 dark:text-white truncate flex items-center gap-1.5">
                     <span className="text-slate-400 font-normal shrink-0">To:</span>
@@ -725,10 +1059,10 @@ export const ArrivalPrediction = () => {
                 </div>
                 <p className="text-[10px] text-slate-500 dark:text-slate-400 truncate">
                   {isGPS 
-                    ? "Mode A: GPS Device Origin • Auto Geolocation Active" 
+                    ? (coords ? "Mode A: GPS Device Origin • Auto Geolocation Active" : "Mode A: GPS Device Origin • Click 'Detect My Live Location'")
                     : (locationState?.beneficiaryName 
-                        ? `Mode B: Family Booking — ${locationState.beneficiaryName} (${locationState?.pincode || 'Karnataka'})` 
-                        : `Mode B: Regional Origin (${locationState?.pincode || '572101'})`)}
+                        ? `Mode B: Family Booking — ${locationState.beneficiaryName} (${locationState?.pincode || locationState?.district || 'Karnataka'})` 
+                        : `Mode B: Regional Origin (${locationState?.name || locationState?.pincode || 'Karnataka'})`)}
                 </p>
               </div>
             </div>
@@ -752,7 +1086,7 @@ export const ArrivalPrediction = () => {
                 rel="noopener noreferrer"
                 className="px-3 py-1.5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs font-bold text-emerald-600 dark:text-emerald-400 hover:bg-slate-50 rounded-xl transition-colors shrink-0 shadow-sm flex items-center gap-1"
               >
-                <Navigation className="w-3 h-3" /> Maps ➔
+                <Navigation className="w-3.5 h-3.5" /> Maps ➔
               </a>
             </div>
           </div>
@@ -761,7 +1095,7 @@ export const ArrivalPrediction = () => {
 
       </div>
 
-      {/* Live Route Navigation & Interactive Map Section */}
+      {/* Live Route Navigation & Real Interactive Map Section */}
       <div className="glass-card rounded-3xl p-6 sm:p-8 space-y-6 border border-slate-200 dark:border-slate-800">
         <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
           <div>
@@ -770,7 +1104,7 @@ export const ArrivalPrediction = () => {
               <h3 className="text-lg font-bold text-slate-900 dark:text-white">Live Hospital Route & Navigation Guide</h3>
             </div>
             <p className="text-xs text-slate-500 mt-1">
-              From: <strong className="text-slate-800 dark:text-slate-200">{locationState?.name || locationLabel}</strong> → <strong>Shridevi Hospital & Research Hospital, SIET Campus, Sira Road</strong>
+              From: <strong className="text-slate-800 dark:text-slate-200">{coords ? (locationState?.name || locationLabel) : 'Selected Origin Location'}</strong> → <strong>Shridevi Hospital & Research Hospital, SIET Campus, Sira Road</strong>
             </p>
           </div>
           <div className="flex items-center gap-2">
@@ -778,7 +1112,7 @@ export const ArrivalPrediction = () => {
               Optimal Route • {departureData?.travel_time_minutes ?? queueState.trafficDurationMinutes ?? 12} mins
             </span>
             <a
-              href={`https://www.google.com/maps/dir/?api=1&origin=${coords.lat},${coords.lng}&destination=13.376230,77.097439`}
+              href={coords ? `https://www.google.com/maps/dir/?api=1&origin=${coords.lat},${coords.lng}&destination=13.376230,77.097439` : `https://maps.google.com/?q=13.376230,77.097439`}
               target="_blank"
               rel="noopener noreferrer"
               className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold rounded-xl transition-all shadow-md shadow-blue-500/20 flex items-center gap-1.5"
@@ -788,39 +1122,39 @@ export const ArrivalPrediction = () => {
           </div>
         </div>
 
-        {/* Dynamic Route Map Simulation Canvas */}
-        <div className="w-full h-72 bg-gradient-to-br from-slate-900 via-slate-950 to-slate-900 rounded-2xl relative overflow-hidden flex items-center justify-center p-6 border border-slate-800 shadow-inner">
-          <div className="absolute inset-0 bg-[radial-gradient(#334155_1px,transparent_1px)] [background-size:20px_20px] opacity-40" />
-
-          {/* Route path graphic */}
-          <svg className="absolute inset-0 w-full h-full stroke-cyan-400" strokeWidth="4" fill="none">
-            <path d="M 80 220 C 220 220, 260 90, 480 140 C 650 180, 720 80, 880 70" strokeDasharray="8,6" className="animate-pulse opacity-80" />
-          </svg>
-
-          {/* Patient start node */}
-          <div className="absolute left-6 sm:left-12 bottom-8 p-3.5 bg-blue-600/90 backdrop-blur-md text-white rounded-2xl shadow-xl flex items-center gap-2.5 text-xs font-bold max-w-xs border border-blue-400/30">
-            <div className="w-3 h-3 rounded-full bg-cyan-300 animate-ping shrink-0" />
-            <div className="truncate">
-              <span className="text-[10px] uppercase font-mono block opacity-80">Origin (Your Location)</span>
-              <span className="truncate">{locationState?.name || 'Patient Origin'}</span>
+        {/* Real Interactive Google Maps Directions Embed or Prompt */}
+        {coords ? (
+          <div className="w-full h-80 rounded-2xl overflow-hidden border border-slate-200 dark:border-slate-800 shadow-inner relative bg-slate-100 dark:bg-slate-900">
+            <iframe
+              title="Live Route Navigation to Shridevi Hospital"
+              src={`https://maps.google.com/maps?saddr=${coords.lat},${coords.lng}&daddr=13.376230,77.097439&output=embed`}
+              width="100%"
+              height="100%"
+              style={{ border: 0 }}
+              allowFullScreen=""
+              loading="lazy"
+              referrerPolicy="no-referrer-when-downgrade"
+              className="w-full h-full"
+            />
+          </div>
+        ) : (
+          <div className="w-full h-80 rounded-2xl border border-dashed border-slate-300 dark:border-slate-800 flex flex-col items-center justify-center text-slate-500 dark:text-slate-400 p-6 space-y-3 bg-slate-50/50 dark:bg-slate-900/50">
+            <div className="w-12 h-12 rounded-2xl bg-blue-50 dark:bg-blue-950/50 text-blue-600 dark:text-blue-400 flex items-center justify-center">
+              <Compass className="w-6 h-6 animate-pulse" />
             </div>
-          </div>
-
-          {/* Waypoint info pill in middle */}
-          <div className="hidden md:flex absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 px-4 py-2 bg-slate-800/90 border border-slate-700/80 rounded-2xl backdrop-blur-md text-slate-200 text-xs font-semibold items-center gap-2 shadow-2xl">
-            <Car className="w-4 h-4 text-cyan-400" />
-            <span>NH-48 Sira Bypass Corridor • Clear Traffic</span>
-          </div>
-
-          {/* Hospital destination node */}
-          <div className="absolute right-6 sm:right-12 top-8 p-3.5 bg-red-600/90 backdrop-blur-md text-white rounded-2xl shadow-xl flex items-center gap-2.5 text-xs font-bold border border-red-400/30">
-            <Navigation className="w-4 h-4 animate-bounce shrink-0 text-white" />
-            <div>
-              <span className="text-[10px] uppercase font-mono block opacity-80">Destination</span>
-              <span>Shridevi Hospital OPD Lounge</span>
+            <div className="text-center">
+              <p className="font-bold text-sm text-slate-800 dark:text-slate-200">Interactive Navigation Map Ready</p>
+              <p className="text-xs text-slate-500 mt-0.5 max-w-sm">Detect your live location or select a town in Mode B to calculate driving distance and render your route to Shridevi Hospital.</p>
             </div>
+            <button
+              type="button"
+              onClick={detectLiveLocation}
+              className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold shadow-md shadow-blue-500/20 transition-all flex items-center gap-1.5 active:scale-95"
+            >
+              <Navigation className="w-3.5 h-3.5" /> 📍 Enable Device GPS Location
+            </button>
           </div>
-        </div>
+        )}
 
         {/* Turn-by-Turn Quick Instructions */}
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs pt-2">
@@ -854,7 +1188,13 @@ export const ArrivalPrediction = () => {
         onClose={() => setIsLocationModalOpen(false)}
         currentLocation={locationState}
         onSelectGPS={setLiveGPSMode}
-        onSelectManual={setManualLocationByPincode}
+        onSelectManual={(pinOrName, opts, customObj) => {
+          if (customObj) {
+            setManualLocationCustom(customObj, opts);
+          } else {
+            setManualLocationByPincode(pinOrName, opts);
+          }
+        }}
         isLocating={isLocating}
       />
 
@@ -916,3 +1256,4 @@ export const ArrivalPrediction = () => {
 };
 
 export default ArrivalPrediction;
+

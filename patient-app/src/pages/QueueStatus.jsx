@@ -1,33 +1,70 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useQueue } from '../context/QueueContext';
+import { queueService } from '../services/queueService';
 import { TopBar } from '../components/TopBar';
 import { ProgressCard } from '../components/ProgressCard';
 import { StatusBadge } from '../components/StatusBadge';
 import { Button } from '../components/Button';
-import { Clock, RefreshCw, Volume2, Users, AlertCircle, CheckCircle2, Ticket } from 'lucide-react';
+import { Clock, RefreshCw, Volume2, Users, AlertCircle, CheckCircle2, Ticket, Calendar, Stethoscope, MapPin } from 'lucide-react';
 import { motion } from 'framer-motion';
 
 // Shows detailed queue progress and exposes refresh and announcement controls.
 export const QueueStatus = () => {
+  const navigate = useNavigate();
   const { queueState, toggleAutoRefresh } = useQueue();
-  const [countdown, setCountdown] = useState(30);
+  const [countdown, setCountdown] = useState(10);
   const [announcement, setAnnouncement] = useState(null);
+  const [streamData, setStreamData] = useState(null);
+  const [loadingStream, setLoadingStream] = useState(true);
 
-  // 30s Countdown timer
+  const doctorId = queueState.doctorId || 3;
+
+  // Fetch live stream for the assigned/active doctor
+  const fetchStream = useCallback(async () => {
+    try {
+      const data = await queueService.getDoctorQueueStream(doctorId);
+      if (data) {
+        setStreamData(data);
+      }
+    } catch (err) {
+      console.warn("Failed to fetch doctor stream:", err);
+    } finally {
+      setLoadingStream(false);
+    }
+  }, [doctorId]);
+
+  useEffect(() => {
+    fetchStream();
+  }, [fetchStream]);
+
+  // 10s Countdown timer and sync
   useEffect(() => {
     if (!queueState.isAutoRefresh) return;
     const timer = setInterval(() => {
-      setCountdown(prev => (prev > 1 ? prev - 1 : 30));
+      setCountdown(prev => {
+        if (prev <= 1) {
+          fetchStream();
+          return 10;
+        }
+        return prev - 1;
+      });
     }, 1000);
     return () => clearInterval(timer);
-  }, [queueState.isAutoRefresh]);
+  }, [queueState.isAutoRefresh, fetchStream]);
 
   // Voice Announcement Simulator
   const handleAnnounce = () => {
-    const currentDisplay = typeof queueState.currentToken === 'string' && queueState.currentToken.includes('-')
-      ? queueState.currentToken
-      : `OPD-${String(queueState.currentToken).padStart(3, '0')}`;
-    const text = `Now calling Token Number ${currentDisplay} for ${queueState.doctor} in ${queueState.roomNo}`;
+    const serving = streamData?.servingToken || queueState.currentToken;
+    const docName = streamData?.doctor || queueState.doctor;
+    const room = streamData?.roomNo || queueState.roomNo;
+    
+    if (!serving) {
+      setAnnouncement("No token currently being served in OPD room.");
+      return;
+    }
+    
+    const text = `Now calling Token Number ${serving} for ${docName} in ${room}`;
     setAnnouncement(text);
     if ('speechSynthesis' in window) {
       const utterance = new SpeechSynthesisUtterance(text);
@@ -36,25 +73,17 @@ export const QueueStatus = () => {
     }
   };
 
-  // Timeline mock tokens
-  const timelineTokens = Array.from({ length: 6 }, (_, i) => {
-    const currentNum = typeof queueState.currentToken === 'number'
-      ? queueState.currentToken
-      : (parseInt(String(queueState.currentToken).replace(/\D/g, '')) || 1);
-    const num = Math.max(1, currentNum - 3 + i);
-    let status = 'Waiting';
-    if (num < currentNum) status = 'Completed';
-    else if (num === currentNum) status = 'Serving';
-    return {
-      token: `OPD-${String(num).padStart(3, '0')}`,
-      time: `${9 + Math.floor(i * 10 / 60)}:${(10 + i * 8) % 60 < 10 ? '0' : ''}${(10 + i * 8) % 60} AM`,
-      status
-    };
-  });
+  const activeDoctorName = streamData?.doctor || queueState.doctor || "General Medicine";
+  const activeDepartmentName = streamData?.department || queueState.department || "General Medicine";
+  const activeRoomNo = streamData?.roomNo || queueState.roomNo || "Room 204";
+  const queueList = streamData?.queue || [];
 
   return (
     <div className="space-y-8">
-      <TopBar title="Real-time OPD Queue Status" subtitle="Live tracking with auto-refresh every 30 seconds" />
+      <TopBar 
+        title="Real-time OPD Queue Status" 
+        subtitle={`Live queue stream for ${activeDepartmentName} • ${activeDoctorName}`} 
+      />
 
       {/* Control Bar: Auto Refresh & Manual Controls */}
       <div className="glass-card rounded-2xl p-4 flex flex-col sm:flex-row items-center justify-between gap-4 border border-slate-200 dark:border-slate-800">
@@ -64,19 +93,21 @@ export const QueueStatus = () => {
           </div>
           <div>
             <p className="text-xs font-bold text-slate-900 dark:text-white">
-              {queueState.isAutoRefresh ? `Auto Sync Active (${countdown}s)` : 'Auto Sync Paused'}
+              {queueState.isAutoRefresh ? `Live Sync Active (${countdown}s)` : 'Auto Sync Paused'}
             </p>
-            <p className="text-[10px] text-slate-500">Last updated: {queueState.lastUpdated}</p>
+            <p className="text-[10px] text-slate-500">
+              Department: {activeDepartmentName} | Room: {activeRoomNo}
+            </p>
           </div>
         </div>
 
         <div className="flex items-center gap-2">
           <Button size="sm" variant="outline" icon={Volume2} onClick={handleAnnounce}>
-            Simulate Voice Announcement
+            Voice Announcement
           </Button>
 
           <Button size="sm" variant={queueState.isAutoRefresh ? 'secondary' : 'primary'} onClick={toggleAutoRefresh}>
-            {queueState.isAutoRefresh ? 'Pause Sync' : 'Resume 30s Sync'}
+            {queueState.isAutoRefresh ? 'Pause Sync' : 'Resume Live Sync'}
           </Button>
         </div>
       </div>
@@ -98,41 +129,68 @@ export const QueueStatus = () => {
         </motion.div>
       )}
 
-      {/* Main Queue Indicators */}
-      <ProgressCard
-        tokenNumber={queueState.tokenNumber}
-        currentToken={queueState.currentToken}
-        numericToken={queueState.numericToken}
-        patientsAhead={queueState.patientsAhead}
-        estimatedWaitMinutes={queueState.estimatedWaitMinutes}
-        emergencyCount={queueState.emergencyCount}
-      />
+      {/* Patient's Personalized Progress Radar (Only when active token is booked) */}
+      {queueState.hasActiveToken && queueState.tokenNumber && (
+        <ProgressCard
+          tokenNumber={queueState.tokenNumber}
+          currentToken={queueState.currentToken || streamData?.servingToken}
+          numericToken={queueState.numericToken}
+          patientsAhead={queueState.patientsAhead}
+          estimatedWaitMinutes={queueState.estimatedWaitMinutes}
+          emergencyCount={queueState.emergencyCount}
+        />
+      )}
 
-      {/* Queue Movement Timeline */}
+      {/* Real Queue Movement Stream */}
       <div className="glass-card rounded-3xl p-6 sm:p-8 space-y-6">
-        <div className="flex items-center justify-between">
-          <h3 className="text-lg font-bold text-slate-900 dark:text-white">Recent OPD Token Stream</h3>
-          <span className="text-xs text-slate-500 font-semibold">{queueState.department} • {queueState.doctor}</span>
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-200 dark:border-slate-800 pb-4">
+          <div>
+            <h3 className="text-lg font-bold text-slate-900 dark:text-white">Live OPD Token Stream</h3>
+            <p className="text-xs text-slate-500">Real-time patient queue progression on doctor's desk</p>
+          </div>
+          <div className="flex items-center gap-2 text-xs font-semibold text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-950/40 px-3 py-1.5 rounded-xl border border-blue-200/50 dark:border-blue-900/50">
+            <Stethoscope className="w-4 h-4" />
+            <span>{activeDepartmentName} • {activeDoctorName}</span>
+          </div>
         </div>
 
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
-          {timelineTokens.map((t, idx) => (
-            <div
-              key={idx}
-              className={`p-4 rounded-2xl border transition-all text-center space-y-1.5 ${
-                t.status === 'Serving'
-                  ? 'bg-blue-500 text-white border-blue-600 shadow-lg shadow-blue-500/30 ring-4 ring-blue-500/20 scale-105'
-                  : t.status === 'Completed'
-                  ? 'bg-slate-100 dark:bg-slate-900/60 border-slate-200 dark:border-slate-800 text-slate-400'
-                  : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 text-slate-800 dark:text-slate-200'
-              }`}
-            >
-              <span className="text-[10px] font-mono opacity-80">{t.time}</span>
-              <p className="text-xl font-black tracking-tight">{t.token}</p>
-              <StatusBadge status={t.status} size="sm" />
+        {queueList.length > 0 ? (
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+            {queueList.map((t, idx) => (
+              <div
+                key={t.id || idx}
+                className={`p-4 rounded-2xl border transition-all text-center space-y-1.5 ${
+                  t.status === 'serving'
+                    ? 'bg-blue-500 text-white border-blue-600 shadow-lg shadow-blue-500/30 ring-4 ring-blue-500/20 scale-105'
+                    : t.status === 'completed'
+                    ? 'bg-slate-100 dark:bg-slate-900/60 border-slate-200 dark:border-slate-800 text-slate-400'
+                    : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 text-slate-800 dark:text-slate-200'
+                }`}
+              >
+                <span className="text-[10px] font-mono opacity-80">{t.booked_time}</span>
+                <p className="text-xl font-black tracking-tight">{t.tokenNumber}</p>
+                <StatusBadge status={t.status === 'serving' ? 'Serving' : t.status === 'completed' ? 'Completed' : 'Waiting'} size="sm" />
+                <p className="text-[10px] font-medium opacity-70 truncate">{t.patient_name}</p>
+              </div>
+            ))}
+          </div>
+        ) : (
+          /* Clean Empty Queue State */
+          <div className="p-8 text-center space-y-4 bg-slate-50/50 dark:bg-slate-900/40 rounded-2xl border border-dashed border-slate-200 dark:border-slate-800">
+            <div className="w-12 h-12 mx-auto rounded-2xl bg-blue-50 dark:bg-blue-950 text-blue-600 dark:text-blue-400 flex items-center justify-center">
+              <Ticket className="w-6 h-6" />
             </div>
-          ))}
-        </div>
+            <div className="space-y-1 max-w-sm mx-auto">
+              <h4 className="text-sm font-bold text-slate-900 dark:text-white">No patients currently in queue</h4>
+              <p className="text-xs text-slate-500 dark:text-slate-400">
+                The consultation queue for {activeDoctorName} is currently clear. Book an appointment to reserve your live token.
+              </p>
+            </div>
+            <Button size="sm" icon={Calendar} onClick={() => navigate('/appointment')}>
+              Book Appointment
+            </Button>
+          </div>
+        )}
       </div>
 
     </div>

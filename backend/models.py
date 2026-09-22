@@ -45,7 +45,7 @@ class Patient(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     name: str
     phone: str
-    email: str
+    email: Optional[str] = Field(default="")
     password_hash: str
 
 
@@ -86,6 +86,13 @@ class Appointment(SQLModel, table=True):
     status: str = "pending"
     queue_position: Optional[int] = None
     departure_notified: bool = Field(default=False)
+    time_slot: Optional[str] = Field(default=None)
+    appointment_date: Optional[str] = Field(default=None)
+    beneficiary_name: Optional[str] = Field(default=None)
+    beneficiary_age: Optional[int] = Field(default=None)
+    beneficiary_gender: Optional[str] = Field(default=None)
+    contact_phone: Optional[str] = Field(default=None)
+    is_dependent: bool = Field(default=False)
 
 
 class QueueLog(SQLModel, table=True):
@@ -99,3 +106,22 @@ class QueueLog(SQLModel, table=True):
     predicted_wait: float
     actual_wait: Optional[float] = None  # filled in AFTER the consultation happens
     timestamp: datetime = Field(default_factory=datetime.utcnow)
+
+
+class Notification(SQLModel, table=True):
+    """
+    In-app notifications for patient lifecycle events:
+    - Stage 1: Booking Confirmed (success/green)
+    - Stage 2: Next in Line Alert (info/blue)
+    - Stage 3: Consultation Completed (success/green)
+    - Stage 4: No-Show Warning (critical/red)
+    - Stage 5: End-of-Day Expiration (warning/red)
+    """
+    id: Optional[int] = Field(default=None, primary_key=True)
+    patient_id: Optional[int] = Field(default=None, foreign_key="patient.id")
+    type: str = "info"
+    title: str
+    message: str
+    severity: str = "info"  # 'success', 'info', 'warning', 'critical'
+    is_read: bool = Field(default=False)
+    created_at: datetime = Field(default_factory=datetime.utcnow)

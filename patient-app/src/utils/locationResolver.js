@@ -38,11 +38,16 @@ export const PINCODE_DATABASE = {
   "560057": { name: "Bengaluru Peenya Industrial / Yeshwanthpur", lat: 13.0285, lng: 77.5197, district: "Bengaluru Urban", tag: "Peenya / Metro" },
   "562123": { name: "Nelamangala Highway Junction", lat: 13.0975, lng: 77.3916, district: "Bengaluru Rural", tag: "Nelamangala Toll" },
   "560064": { name: "Yelahanka / North Bengaluru", lat: 13.1007, lng: 77.5963, district: "Bengaluru Urban", tag: "Yelahanka" },
-  "562159": { name: "Doddaballapura Town", lat: 13.2929, lng: 77.5413, district: "Bengaluru Rural", tag: "Doddaballapura" }
+  "562159": { name: "Doddaballapura Town", lat: 13.2929, lng: 77.5413, district: "Bengaluru Rural", tag: "Doddaballapura" },
+
+  // Central Karnataka / Davanagere Region
+  "577002": { name: "Davanagere City / PB Road", lat: 14.4644, lng: 75.9218, district: "Davanagere", tag: "Davanagere Central" },
+  "577001": { name: "Davanagere Main / Gandhi Circle", lat: 14.4589, lng: 75.9192, district: "Davanagere", tag: "Davanagere Main" }
 };
 
 // Popular 1-Click Presets for Quick Patient Selection & Demonstration Tiers
 export const LOCATION_PRESETS = [
+  { id: 'davanagere_city', label: 'Davanagere City (Far Tier)', pin: '577002', detail: 'Davanagere (~140-180 mins)', ...PINCODE_DATABASE['577002'] },
   { id: 'siet_campus', label: 'SIET Campus (Near)', pin: '572106', detail: 'Near Campus (~2 mins)', ...PINCODE_DATABASE['572106'] },
   { id: 'tumakuru_city', label: 'Tumakuru Town (Medium)', pin: '572101', detail: 'Central Town (~12-15 mins)', ...PINCODE_DATABASE['572101'] },
   { id: 'bengaluru_majestic', label: 'Bengaluru Majestic (Far)', pin: '560023', detail: 'City Center (~85-110 mins)', ...PINCODE_DATABASE['560023'] },
@@ -52,12 +57,36 @@ export const LOCATION_PRESETS = [
 ];
 
 /**
+ * Cleanse location string to remove repetitive 'Location (' or 'Live Location (' wrappers.
+ */
+export const cleanseLocationName = (str = '') => {
+  if (!str) return '';
+  let cleaned = String(str).trim();
+  // Strip nested Location ( ... ) or Live Location ( ... ) wrappers recursively
+  while (/^(?:Location|Live Location|GPS Location|Current Location)\s*\((.*)\)$/i.test(cleaned)) {
+    cleaned = cleaned.replace(/^(?:Location|Live Location|GPS Location|Current Location)\s*\((.*)\)$/i, '$1').trim();
+  }
+  return cleaned;
+};
+
+/**
  * Resolves a 6-digit postal pincode to GPS coordinates
  * @param {string} pincode 
  * @returns {{ success: boolean, name: string, lat: number, lng: number, district: string, isEstimated: boolean }}
  */
 export const resolvePincode = (pincode) => {
   const cleanPin = String(pincode || "").trim();
+  if (!cleanPin) {
+    return {
+      success: false,
+      pincode: "",
+      name: "No Location Specified",
+      lat: null,
+      lng: null,
+      district: "",
+      isEstimated: false
+    };
+  }
   
   if (PINCODE_DATABASE[cleanPin]) {
     return {
@@ -122,17 +151,23 @@ const STORAGE_KEY = "mediflow_origin_location";
 export const getSavedLocation = () => {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    if (raw) return JSON.parse(raw);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (parsed && parsed.mode === 'manual' && parsed.lat && parsed.lng) {
+        return parsed;
+      }
+    }
   } catch {
     // fallback
   }
   return {
     mode: "gps", // 'gps' | 'manual'
-    label: "Current Location (Live GPS)",
+    label: "Live GPS (Not Detected)",
     pincode: "",
-    name: "Live GPS Detection",
-    lat: 13.340881,
-    lng: 77.100601,
+    name: "Current Device Location",
+    lat: null,
+    lng: null,
+    status: "prompt_needed",
     isFamilyBooking: false,
     beneficiaryName: ""
   };
@@ -145,6 +180,7 @@ export const saveLocation = (locationData) => {
     console.warn("Failed to persist location preference:", err);
   }
 };
+
 
 /**
  * Calls backend GET /geocode to resolve real coordinates via OpenRouteService Pelias
@@ -160,7 +196,6 @@ export const geocodeLocationQuery = async (query) => {
   }
 
   try {
-    // Import api dynamically or use fetch
     const backendUrl = import.meta.env.VITE_API_URL || 'http://localhost:8000';
     const resp = await fetch(`${backendUrl}/geocode?query=${encodeURIComponent(clean)}`);
     if (resp.ok) {
@@ -174,7 +209,8 @@ export const geocodeLocationQuery = async (query) => {
           lng: Number(res.lng),
           district: res.district || "Karnataka",
           isEstimated: Boolean(res.isEstimated),
-          source: res.source || "openrouteservice"
+          source: res.source || "openrouteservice",
+          results: res.results || []
         };
       }
     }
@@ -184,4 +220,32 @@ export const geocodeLocationQuery = async (query) => {
 
   return resolvePincode(clean);
 };
+
+/**
+ * Calls backend GET /geocode/reverse to reverse-geocode GPS coordinates into human-readable place name
+ */
+export const reverseGeocodeCoords = async (lat, lng) => {
+  try {
+    const backendUrl = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+    const resp = await fetch(`${backendUrl}/geocode/reverse?lat=${lat}&lng=${lng}`);
+    if (resp.ok) {
+      const res = await resp.json();
+      if (res && res.success) {
+        return res;
+      }
+    }
+  } catch (err) {
+    console.warn("Reverse geocode request failed, using coordinates fallback:", err.message);
+  }
+
+  return {
+    success: true,
+    formatted_address: `GPS Location (${Number(lat).toFixed(4)}, ${Number(lng).toFixed(4)})`,
+    locality: "Tumakuru Vicinity",
+    district: "Tumakuru",
+    lat,
+    lng
+  };
+};
+
 

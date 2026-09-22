@@ -17,6 +17,7 @@ import { ArrivalPrediction } from './pages/ArrivalPrediction';
 import { Notifications } from './pages/Notifications';
 import { Profile } from './pages/Profile';
 import { Appointment } from './pages/Appointment';
+import { ForgotPassword } from './pages/ForgotPassword';
 import { FAQ } from './pages/FAQ';
 import { Contact } from './pages/Contact';
 import { NotFound } from './pages/NotFound';
@@ -66,12 +67,14 @@ export function App() {
                 <Route path="/" element={<Home />} />
                 <Route path="/login" element={<Login />} />
                 <Route path="/register" element={<Register />} />
+                <Route path="/forgot-password" element={<ForgotPassword />} />
                 <Route path="/dashboard" element={<Dashboard />} />
                 <Route path="/queue-status" element={<QueueStatus />} />
                 <Route path="/arrival-prediction" element={<ArrivalPrediction />} />
                 <Route path="/notifications" element={<Notifications />} />
                 <Route path="/profile" element={<Profile />} />
                 <Route path="/appointment" element={<Appointment />} />
+                <Route path="/book-appointment" element={<Appointment />} />
                 <Route path="/faq" element={<FAQ />} />
                 <Route path="/contact" element={<Contact />} />
                 <Route path="*" element={<NotFound />} />

@@ -99,7 +99,7 @@ def get_ors_travel_details(
     }
 
     try:
-        response = requests.get(url, params=params, headers=headers, timeout=8)
+        response = requests.get(url, params=params, headers=headers, timeout=4)
         if response.status_code == 200:
             data = response.json()
             features = data.get("features", [])

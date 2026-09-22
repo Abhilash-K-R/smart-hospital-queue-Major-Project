@@ -10,7 +10,7 @@ import { Bell, CheckCheck, Filter, Smartphone, MessageSquare, ShieldCheck, Check
 
 // Loads the notification feed and allows patient to configure their mobile alert number.
 export const Notifications = () => {
-  const { notifications, unreadCount, markAsRead } = useNotification();
+  const { notifications, unreadCount, markAsRead, markAllRead } = useNotification();
   const { user, setUser } = useAuth();
   const [filter, setFilter] = useState('All');
   const [phone, setPhone] = useState(user?.phone || DEMO_PATIENT.phone || "9876543210");
@@ -20,12 +20,12 @@ export const Notifications = () => {
 
   const filteredNotifications = notifications.filter(n => {
     if (filter === 'Unread') return !n.read;
-    if (filter === 'Emergency') return n.type === 'emergency' || n.priority === 'warning';
+    if (filter === 'Emergency') return n.type === 'emergency' || n.type === 'no_show_warning' || n.priority === 'warning' || n.severity === 'critical';
     return true;
   });
 
   const handleMarkAllRead = () => {
-    notifications.forEach(n => markAsRead(n.id));
+    markAllRead();
   };
 
   const handleSavePhone = () => {
