@@ -7,6 +7,7 @@ import { LanguageProvider } from './context/LanguageContext';
 import { Navbar } from './components/Navbar';
 import { Footer } from './components/Footer';
 import { Sidebar } from './components/Sidebar';
+import { BottomNav } from './components/BottomNav';
 
 import { Home } from './pages/Home';
 import { Login } from './pages/Login';
@@ -38,21 +39,24 @@ const Layout = ({ children }) => {
   ].includes(location.pathname);
 
   return (
-    <div className="min-h-screen flex flex-col justify-between">
+    <div className="min-h-screen flex flex-col justify-between bg-slate-50 dark:bg-[#090D16] text-slate-900 dark:text-slate-100 overflow-x-hidden">
       <Navbar />
 
-      <main className="flex-1">
+      <main className="flex-1 pb-20 md:pb-8">
         {isDashboardRoute ? (
-          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 flex gap-8">
+          <div className="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 py-4 sm:py-8 flex gap-6 lg:gap-8">
             <Sidebar />
             <div className="flex-1 min-w-0">{children}</div>
           </div>
         ) : (
-          <div className="py-6">{children}</div>
+          <div className="py-4 sm:py-6 px-3 sm:px-6">{children}</div>
         )}
       </main>
 
       <Footer />
+      
+      {/* Native-style Mobile Bottom Navigation Bar */}
+      <BottomNav />
     </div>
   );
 };
