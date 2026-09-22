@@ -2502,7 +2502,7 @@ def insert_emergency_patient(req: EmergencyInsertRequest):
             emergency_appt = Appointment(
                 patient_id=emergency_patient.id,
                 doctor_id=doctor.id,
-                booked_time=datetime.utcnow(),
+                booked_time=datetime.now(timezone.utc),
                 status="pending",
                 queue_position=1,
                 beneficiary_name=patient_name,
