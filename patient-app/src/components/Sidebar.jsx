@@ -2,12 +2,16 @@ import React from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { LayoutDashboard, Clock, Navigation, Bell, User, LogOut, Ticket, HelpCircle } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
+import { useQueue } from '../context/QueueContext';
 
 // Provides navigation and patient context for dashboard-oriented routes.
 export const Sidebar = () => {
   const location = useLocation();
   const navigate = useNavigate();
   const { logout, user } = useAuth();
+  const { queueState } = useQueue();
+
+  const activeToken = queueState?.tokenNumber || user?.tokenNumber || (user?.appointment_id ? `OPD-${String(user.appointment_id).padStart(3, '0')}` : null);
 
   const menuItems = [
     { path: '/dashboard', label: 'Overview', icon: LayoutDashboard },
@@ -33,7 +37,9 @@ export const Sidebar = () => {
             />
             <div className="min-w-0">
               <h4 className="text-xs font-bold text-slate-900 dark:text-white truncate">{user.name}</h4>
-              <p className="text-[10px] text-blue-600 dark:text-blue-400 font-semibold truncate">Token: {user.tokenNumber}</p>
+              <p className="text-[10px] text-blue-600 dark:text-blue-400 font-semibold truncate">
+                {activeToken ? `Token: ${activeToken}` : 'No Active Token'}
+              </p>
             </div>
           </div>
         )}

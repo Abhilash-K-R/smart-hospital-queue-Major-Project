@@ -133,14 +133,16 @@ export const Navbar = () => {
             <div className="flex items-center gap-2">
               <Link
                 to="/profile"
-                className="flex items-center gap-2 p-1.5 pr-3 rounded-2xl bg-blue-50 dark:bg-blue-950/40 border border-blue-200 dark:border-blue-900/60 hover:border-blue-400 transition-all"
+                className="flex items-center gap-2.5 py-1.5 px-3 rounded-2xl bg-blue-50/90 dark:bg-blue-950/50 border border-blue-200 dark:border-blue-900/60 hover:border-blue-400 hover:bg-blue-100/60 dark:hover:bg-blue-900/40 transition-all shrink-0 min-w-max shadow-sm"
               >
                 <img
                   src={user.avatar || "https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&q=80&w=250"}
                   alt={user.name}
-                  className="w-7 h-7 rounded-xl object-cover"
+                  className="w-8 h-8 rounded-xl object-cover ring-2 ring-blue-500/20 shrink-0"
                 />
-                <span className="text-xs font-bold text-slate-800 dark:text-slate-200 hidden sm:inline">{user.name}</span>
+                <span className="text-xs font-bold text-slate-800 dark:text-slate-200 hidden sm:inline whitespace-nowrap tracking-tight">
+                  {user.name}
+                </span>
               </Link>
             </div>
           ) : (

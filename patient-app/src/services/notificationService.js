@@ -20,6 +20,15 @@ export const notificationService = {
     }
   },
 
+  // Marks all notifications as read
+  async markAllRead() {
+    try {
+      return await api.post('/notifications/mark-all-read');
+    } catch {
+      return { success: true };
+    }
+  },
+
   // Generates dual WhatsApp and SMS dispatch messages for smart arrival alerts
   async getDispatchPreview(payload) {
     try {

@@ -16,6 +16,14 @@ export const PROJECT_INFO = {
   algorithm: "Random Forest Regressor + Google Distance Matrix"
 };
 
+// Default uninitialized patient location (No hardcoded coordinates)
+export const DEFAULT_PATIENT_LOCATION = {
+  lat: null,
+  lng: null,
+  name: null,
+  status: 'uninitialized'
+};
+
 // Demo Mode Default Data
 export const DEMO_PATIENT = {
   id: "P-10928",
@@ -25,21 +33,21 @@ export const DEMO_PATIENT = {
   phone: "+91 98765 43210",
   email: "laxuman.patient@shridevimediflow.ai",
   bloodGroup: "O+",
-  tokenNumber: "OPD-002",
-  numericToken: 2,
-  currentToken: 1,
-  patientsAhead: 1,
-  estimatedWaitMinutes: 15,
-  doctor: "Dr. Rajeswari R.",
-  doctorId: "doc-3",
-  department: "General Medicine",
-  roomNo: "O.P.D Block B - Room 204",
-  appointmentTime: "10:30 AM",
-  appointmentDate: "Today",
-  symptoms: "Seasonal viral fever & mild headache",
-  trafficDurationMinutes: 12,
-  leaveAfterMinutes: 8,
-  distanceKm: 4.8,
+  tokenNumber: null,
+  numericToken: null,
+  currentToken: null,
+  patientsAhead: 0,
+  estimatedWaitMinutes: 0,
+  doctor: null,
+  doctorId: null,
+  department: null,
+  roomNo: null,
+  appointmentTime: null,
+  appointmentDate: null,
+  symptoms: null,
+  trafficDurationMinutes: 0,
+  leaveAfterMinutes: 0,
+  distanceKm: 0,
   hospitalAddress: "Shridevi Hospital & Research Hospital, Sira Road, Tumakuru - 572106",
   emergencyInsertedCount: 0,
   avatar: "https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&q=80&w=250"

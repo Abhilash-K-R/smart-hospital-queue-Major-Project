@@ -6,13 +6,17 @@ const api = axios.create({
   headers: {
     'Content-Type': 'application/json'
   },
-  timeout: 10000
+  timeout: 30000
 });
 
 // Adds the persisted bearer token to authenticated requests.
 api.interceptors.request.use(
   (config) => {
-    const token = localStorage.getItem('mediflow_auth_token');
+    const token =
+      localStorage.getItem('mediflow_auth_token') ||
+      localStorage.getItem('token') ||
+      localStorage.getItem('auth_token') ||
+      localStorage.getItem('access_token');
     if (token) {
       config.headers.Authorization = `Bearer ${token}`;
     }

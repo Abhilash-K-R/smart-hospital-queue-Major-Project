@@ -6,14 +6,28 @@ import { StatusBadge } from './StatusBadge';
 // Summarizes the patient's token against the currently served queue token.
 export const QueueCard = ({ queueData }) => {
   const {
-    tokenNumber = "GEN-018",
-    currentToken = 12,
-    patientsAhead = 6,
-    estimatedWaitMinutes = 24,
-    doctor = "Dr. Rajeswari N.",
+    tokenNumber = null,
+    currentToken = null,
+    patientsAhead = 0,
+    estimatedWaitMinutes = 0,
+    doctor = "Assigned Doctor",
     department = "General Medicine",
-    roomNo = "O.P.D Block B - Room 204"
+    roomNo = "OPD Consultation Room",
+    status = "pending",
+    isExpired = false
   } = queueData || {};
+
+  if (!tokenNumber) return null;
+
+  const now = new Date();
+  const isPastOpdHours = now.getHours() >= 20 || now.getHours() < 8;
+  const isSlotExpired = isExpired || status === 'expired' || currentToken === 'OPD-CLOSED';
+
+  const badgeStatus = isSlotExpired
+    ? 'Expired'
+    : (isPastOpdHours
+      ? 'Closed'
+      : (status === 'completed' ? 'Completed' : (patientsAhead === 0 ? 'Serving' : 'Waiting')));
 
   return (
     <motion.div
@@ -23,9 +37,11 @@ export const QueueCard = ({ queueData }) => {
       <div className="flex items-center justify-between border-b border-slate-200 dark:border-slate-800 pb-4 mb-4">
         <div className="flex items-center gap-2">
           <Ticket className="w-5 h-5 text-blue-600 dark:text-blue-400" />
-          <span className="text-xs font-bold uppercase tracking-wider text-slate-500">Live Active Pass</span>
+          <span className="text-xs font-bold uppercase tracking-wider text-slate-500">
+            {isSlotExpired ? "Concluded OPD Pass" : "Live Active Pass"}
+          </span>
         </div>
-        <StatusBadge status={patientsAhead === 0 ? "Serving" : "Waiting"} />
+        <StatusBadge status={badgeStatus} />
       </div>
 
       <div className="grid grid-cols-2 gap-4 my-2">

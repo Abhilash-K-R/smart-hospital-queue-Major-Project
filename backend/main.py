@@ -16,20 +16,25 @@ Owner: Abhilash (Phase 2)
 HOSPITAL_LAT = 13.376230
 HOSPITAL_LNG = 77.097439
 
-from fastapi import FastAPI, HTTPException, Depends, Request
+from fastapi import FastAPI, HTTPException, Depends, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from sqlmodel import Session, select, text
+from sqlalchemy import func
 from dotenv import load_dotenv
-import os
-import requests
 
-from travel_time import get_travel_time_minutes
-from models import Patient, Department, Doctor, SymptomMapping, Appointment, StaffUser, QueueLog
+import os
+import re
+import requests
+import uuid
+
+from travel_time import get_travel_time_minutes, get_ors_travel_details
+from models import Patient, Department, Doctor, SymptomMapping, Appointment, StaffUser, QueueLog, Notification
 from schemas import (
     DepartmentResponse, DoctorResponse,
     SymptomMappingResponse, SymptomMappingUpdateRequest,
     AppointmentCreateRequest, AppointmentResponse,
     DepartureCheckRequest, DepartureCheckResponse,
+    AuthRegisterRequest, AuthRegisterResponse,
     FrontendLoginRequest, FrontendLoginResponse, FrontendRegisterRequest,
     FrontendQueueStatusResponse,
     NotificationItem,
@@ -40,6 +45,9 @@ from schemas import (
     QueueLogItem, QueueLogResponse,
     AppointmentBookRequest, AppointmentBookResponse,
     DispatchNotificationRequest, DispatchNotificationResponse,
+    ForgotPasswordRequest, ForgotPasswordResetRequest, ForgotPasswordResponse,
+    DoctorQueueStreamItem, DoctorQueueStreamResponse,
+    StaffWalkInRegisterRequest, StaffWalkInRegisterResponse,
 )
 
 
@@ -65,8 +73,87 @@ def apply_operational_delay_overlay(base_wait_minutes: float, doctor_id: Optiona
 
 
 from ml_predictor import predict_wait
-from auth import hash_password, verify_password, create_access_token, get_current_user
-from datetime import datetime, timedelta
+from auth import hash_password, verify_password, create_access_token, get_current_user, get_optional_current_user
+from datetime import datetime, timedelta, timezone
+
+# Standard Indian Standard Time (IST = UTC+5:30)
+IST = timezone(timedelta(hours=5, minutes=30))
+
+
+TRIAGE_PRIORITY = {
+    "Emergency": 0,
+    "Trauma": 0,
+    "Critical": 0,
+    "Urgent": 1,
+    "Standard": 2,
+    "Normal": 2
+}
+
+def parse_slot_to_minutes(slot_str: Optional[str]) -> int:
+    """Converts any slot string like '09:30 AM', '10:30 AM - Morning Shift', etc. to minutes from midnight."""
+    if not slot_str:
+        return 9999
+    try:
+        match = re.search(r'(\d{1,2}):(\d{2})\s*(AM|PM)', str(slot_str), re.IGNORECASE)
+        if not match:
+            return 9999
+        hours, mins, period = int(match.group(1)), int(match.group(2)), match.group(3).upper()
+        if period == "PM" and hours != 12:
+            hours += 12
+        elif period == "AM" and hours == 12:
+            hours = 0
+        return hours * 60 + mins
+    except Exception:
+        return 9999
+
+def parse_slot_time_to_minutes(slot_str: Optional[str]) -> Optional[int]:
+    """Compatibility wrapper returning None if invalid."""
+    mins = parse_slot_to_minutes(slot_str)
+    return mins if mins != 9999 else None
+
+def get_sorted_doctor_appointments(
+    session: Session,
+    doctor_id: Optional[int] = None,
+    appointment_date: Optional[str] = None,
+    statuses: Optional[List[str]] = None
+) -> List[Appointment]:
+    """
+    Returns active appointments for a doctor (or all doctors) sorted chronologically by:
+      1. Serving status (serving always at position 0)
+      2. Triage priority level (Emergency/Trauma/Critical -> Urgent -> Standard)
+      3. Appointment Date (earlier dates first)
+      4. Scheduled Slot Time (09:30 AM before 10:00 AM before 10:30 AM before 11:00 AM)
+      5. Booking creation order / Appointment.id (tie-breaker for same slot)
+    """
+    if statuses is None:
+        statuses = ["serving", "pending"]
+
+    query = select(Appointment).where(Appointment.status.in_(statuses))
+    if doctor_id:
+        query = query.where(Appointment.doctor_id == doctor_id)
+    if appointment_date:
+        query = query.where(Appointment.appointment_date == appointment_date)
+
+    appts = session.exec(query).all()
+
+    def get_triage(a: Appointment) -> int:
+        name = a.beneficiary_name or ""
+        if "Emergency" in name or "Critical" in name or "EMG-" in str(a.id):
+            return 0
+        if hasattr(a, 'triage_level') and a.triage_level:
+            return TRIAGE_PRIORITY.get(a.triage_level, 2)
+        return 2
+
+    return sorted(
+        appts,
+        key=lambda a: (
+            0 if a.status == "serving" else 1,
+            get_triage(a),
+            a.appointment_date or "",
+            parse_slot_to_minutes(a.time_slot),
+            a.id
+        )
+    )
 
 from typing import List, Optional
 
@@ -218,45 +305,184 @@ def update_symptom_mapping(mapping_id: int, request: SymptomMappingUpdateRequest
 # ---------------------------------------------------------------------
 
 @app.post("/appointments", response_model=AppointmentResponse)
+@app.post("/patients/book", response_model=AppointmentResponse)
 def create_appointment(
     request: AppointmentCreateRequest,
-    current_user: dict = Depends(get_current_user),
+    current_user: Optional[dict] = Depends(get_optional_current_user),
 ):
     """
-    Books a new appointment for the LOGGED-IN patient.
-    current_user["sub"] holds the patient's id, extracted from their JWT token.
+    Books a new appointment for the patient.
+    If authenticated via JWT, binds to the logged-in patient.
+    If called in demo or fallback mode, gracefully resolves the patient record by phone/id.
     """
-    patient_id = int(current_user["sub"])
+    patient_id = None
+    if current_user and "sub" in current_user:
+        try:
+            patient_id = int(current_user["sub"])
+        except ValueError:
+            pass
+
+    now_ist = datetime.now(IST)
+    today_ist = now_ist.strftime("%Y-%m-%d")
+    chosen_date = request.date or today_ist
+    chosen_slot = request.time_slot or request.timeSlot or "09:30 AM"
+
+    # Reject past slots if booking for today
+    if chosen_date == today_ist:
+        slot_mins = parse_slot_time_to_minutes(chosen_slot)
+        curr_mins = now_ist.hour * 60 + now_ist.minute
+        if slot_mins is not None and slot_mins <= curr_mins:
+            raise HTTPException(
+                status_code=400,
+                detail="Selected time slot has already passed."
+            )
 
     with Session(engine) as session:
+        # If not resolved via JWT token, fall back gracefully to phone/request info
+        if not patient_id:
+            lookup_phone = (request.phone or request.contact_phone or "").strip()
+            if lookup_phone:
+                p = session.exec(select(Patient).where(Patient.phone == lookup_phone)).first()
+                if p:
+                    patient_id = p.id
+            if not patient_id and request.patient_id:
+                raw_pid = request.patient_id
+                pid_int = raw_pid if isinstance(raw_pid, int) else (int(re.findall(r'\d+', str(raw_pid))[0]) if re.findall(r'\d+', str(raw_pid)) else None)
+                if pid_int:
+                    p = session.get(Patient, pid_int)
+                    if p:
+                        patient_id = p.id
+            # If still not found, create a patient record or find by name/phone
+            if not patient_id:
+                fallback_name = request.patient_name or "Patient"
+                fallback_phone = lookup_phone or "9876543210"
+                p = session.exec(select(Patient).where(Patient.phone == fallback_phone)).first()
+                if not p:
+                    p = Patient(
+                        name=fallback_name,
+                        phone=fallback_phone,
+                        email=request.email or f"patient_{fallback_phone}@shridevimediflow.ai",
+                        hashed_password=hash_password("DemoPass@123"),
+                        role="patient"
+                    )
+                    session.add(p)
+                    session.commit()
+                    session.refresh(p)
+                patient_id = p.id
+
         doctor = resolve_doctor_from_request(session, request.doctor_id, request.doctor, request.department)
         if not doctor:
             raise HTTPException(status_code=404, detail="Doctor not found")
 
+        # Determine attendee details (Myself vs Family Member / Dependent)
+        is_dep = bool(request.is_dependent)
+        beneficiary_name = request.patient_name or request.beneficiary_name
+        raw_age = request.patient_age or request.beneficiary_age
+        if isinstance(raw_age, int):
+            beneficiary_age = raw_age
+        elif isinstance(raw_age, str):
+            digits = re.findall(r'\d+', raw_age)
+            beneficiary_age = int(digits[0]) if digits else 30
+        else:
+            beneficiary_age = 30
+        beneficiary_gender = request.patient_gender or request.beneficiary_gender or "Male"
+        contact_phone = request.contact_phone or request.phone
+
+        # Idempotency / Duplicate Booking Guard
+        if is_dep:
+            dep_clean_name = (beneficiary_name or "").strip().lower()
+            dep_clean_phone = (contact_phone or "").strip()
+            existing_active = session.exec(
+                select(Appointment).where(
+                    Appointment.patient_id == patient_id,
+                    Appointment.doctor_id == doctor.id,
+                    Appointment.appointment_date == chosen_date,
+                    Appointment.is_dependent == True,
+                    func.lower(Appointment.beneficiary_name) == dep_clean_name,
+                    Appointment.contact_phone == dep_clean_phone,
+                    Appointment.status.in_(["pending", "serving"])
+                )
+            ).first()
+            if existing_active:
+                token_str = f"OPD-{existing_active.id:03d}"
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail=f"An active appointment ({token_str}) already exists for {beneficiary_name} with {doctor.name} on {chosen_date}."
+                )
+        else:
+            existing_active = session.exec(
+                select(Appointment).where(
+                    Appointment.patient_id == patient_id,
+                    Appointment.doctor_id == doctor.id,
+                    Appointment.appointment_date == chosen_date,
+                    Appointment.is_dependent == False,
+                    Appointment.status.in_(["pending", "serving"])
+                )
+            ).first()
+            if existing_active:
+                token_str = f"OPD-{existing_active.id:03d}"
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail=f"You already have an active personal appointment ({token_str}) booked with {doctor.name} for {chosen_date}."
+                )
+
+
         existing_count = len(
             session.exec(
-                select(Appointment).where(
+                select(Appointment.id).where(
                     Appointment.doctor_id == doctor.id,
                     Appointment.status == "pending",
                 )
             ).all()
         )
 
+        # Determine attendee details (Myself vs Family Member / Dependent)
+        is_dep = bool(request.is_dependent)
+        beneficiary_name = request.patient_name or request.beneficiary_name
+        beneficiary_age = request.patient_age or request.beneficiary_age
+        beneficiary_gender = request.patient_gender or request.beneficiary_gender
+        contact_phone = request.contact_phone
+
         new_appointment = Appointment(
             patient_id=patient_id,
             doctor_id=doctor.id,
-            booked_time=datetime.utcnow(),
+            booked_time=now_ist.replace(tzinfo=None),
             status="pending",
             queue_position=existing_count + 1,
+            time_slot=chosen_slot,
+            appointment_date=chosen_date,
+            beneficiary_name=beneficiary_name,
+            beneficiary_age=beneficiary_age,
+            beneficiary_gender=beneficiary_gender,
+            contact_phone=contact_phone,
+            is_dependent=is_dep,
         )
         session.add(new_appointment)
         session.commit()
         session.refresh(new_appointment)
 
+        # Strict accurate calculation of patients ahead in line based on slot chronological sorting
+        active_doctor_queue = get_sorted_doctor_appointments(session, doctor_id=doctor.id, appointment_date=chosen_date)
+        try:
+            target_idx = next(i for i, a in enumerate(active_doctor_queue) if a.id == new_appointment.id)
+            patients_ahead = sum(1 for a in active_doctor_queue[:target_idx] if a.status == "pending")
+            calculated_pos = target_idx + 1
+        except StopIteration:
+            patients_ahead = 0
+            calculated_pos = 1
+
+        new_appointment.queue_position = calculated_pos
+        session.add(new_appointment)
+        session.commit()
+
         dept = session.get(Department, doctor.department_id)
         dept_name = dept.name if dept else "General Medicine"
         meta = DOCTOR_METADATA.get(doctor.name, {})
-        est_wait = round(existing_count * doctor.avg_consult_minutes * 0.85, 1)
+        est_wait = round(patients_ahead * doctor.avg_consult_minutes * 0.85, 1)
+
+        pat_row = session.get(Patient, patient_id)
+        display_name = beneficiary_name or (pat_row.name if pat_row else "Patient")
+        display_phone = contact_phone or (pat_row.phone if pat_row else None)
 
         return AppointmentResponse(
             id=new_appointment.id,
@@ -269,26 +495,175 @@ def create_appointment(
             doctor=doctor.name,
             department=dept_name,
             roomNo=meta.get("room", "Room 204"),
-            patientsAhead=existing_count,
+            time_slot=chosen_slot,
+            appointment_date=chosen_date,
+            patient_name=display_name,
+            patient_age=beneficiary_age,
+            patient_gender=beneficiary_gender,
+            contact_phone=display_phone,
+            is_dependent=is_dep,
+            patientsAhead=patients_ahead,
             estimatedWaitMinutes=est_wait,
         )
 
 
 
-@app.get("/appointments/my", response_model=List[AppointmentResponse])
-def get_my_appointments(current_user: dict = Depends(get_current_user)):
-    """
-    Returns only the LOGGED-IN patient's own appointments — never
-    another patient's, since patient_id comes from the token, not
-    from the request.
-    """
-    patient_id = int(current_user["sub"])
 
+def auto_expire_past_appointments(session: Session) -> int:
+    """
+    Real-world End-of-Day (8:00 PM) and Past-Date Automatic Expiration Engine:
+    Any appointment whose date is before today, OR whose date is today (or unset)
+    and was booked earlier during daytime before 8:00 PM (or over 15 minutes ago)
+    when current local time has passed 20:00 (8:00 PM OPD closing time),
+    is automatically marked 'expired' and receives a Stage 5 in-app notification.
+    """
+    now = datetime.now()
+    today_str = now.strftime("%Y-%m-%d")
+    is_past_8pm = now.hour >= 20  # 8:00 PM (20:00)
+
+    # 1. Appointments from previous calendar days still in 'pending' or 'serving'
+    query_past_days = select(Appointment).where(
+        Appointment.status.in_(["pending", "serving"]),
+        Appointment.appointment_date < today_str
+    )
+    past_appts = session.exec(query_past_days).all()
+
+    # 2. If it's past 8:00 PM today, stale daytime appointments expire
+    today_expired_appts = []
+    if is_past_8pm:
+        query_today = select(Appointment).where(
+            Appointment.status.in_(["pending", "serving"]),
+            (Appointment.appointment_date == today_str) | (Appointment.appointment_date == None) | (Appointment.appointment_date == "Today")
+        )
+        today_appts = session.exec(query_today).all()
+        for a in today_appts:
+            # If registered in the current active session within last 10 minutes, keep active; otherwise expire
+            is_recent_active = False
+            if a.booked_time:
+                age_secs = abs((now - a.booked_time).total_seconds())
+                if age_secs < 600:
+                    is_recent_active = True
+            if not is_recent_active:
+                today_expired_appts.append(a)
+
+    seen_ids = set()
+    all_to_expire = []
+    for a in (past_appts + today_expired_appts):
+        if a.id not in seen_ids:
+            seen_ids.add(a.id)
+            all_to_expire.append(a)
+
+    expired_count = len(all_to_expire)
+
+    for appt in all_to_expire:
+        appt.status = "expired"
+        appt.queue_position = None
+        session.add(appt)
+        if appt.patient_id:
+            create_patient_notification(
+                session=session,
+                patient_id=appt.patient_id,
+                notif_type="slot_expired",
+                title="⚠️ Slot Expired (OPD Closed)",
+                message=f"Appointment #{appt.id} Expired: Hospital OPD hours closed at 8:00 PM. Please book an appointment for tomorrow.",
+                severity="warning"
+            )
+
+    if expired_count > 0:
+        session.commit()
+    return expired_count
+
+
+@app.get("/appointments/me", response_model=List[AppointmentResponse])
+@app.get("/appointments/my", response_model=List[AppointmentResponse])
+def get_my_appointments(
+    current_user: Optional[dict] = Depends(get_optional_current_user),
+    phone: Optional[str] = None,
+    patient_id: Optional[int] = None
+):
+    """
+    Returns the patient's own appointments enriched with doctor name,
+    department, room number, token number, and live queue position.
+    Supports JWT Bearer auth or phone/patient_id lookup.
+    """
     with Session(engine) as session:
+        # Run automatic end-of-day / past slot expiration check
+        auto_expire_past_appointments(session)
+
+        resolved_patient_id = None
+        if current_user and "sub" in current_user:
+            try:
+                resolved_patient_id = int(current_user["sub"])
+            except ValueError:
+                pass
+        
+        if not resolved_patient_id and phone:
+            p = session.exec(select(Patient).where(Patient.phone == phone.strip())).first()
+            if p:
+                resolved_patient_id = p.id
+                
+        if not resolved_patient_id and patient_id:
+            resolved_patient_id = patient_id
+
+        if not resolved_patient_id:
+            # If completely unauthenticated and no phone/id provided, return empty list
+            return []
+
         appointments = session.exec(
-            select(Appointment).where(Appointment.patient_id == patient_id)
+            select(Appointment)
+            .where(Appointment.patient_id == resolved_patient_id)
+            .order_by(Appointment.id.desc())
         ).all()
-        return appointments
+
+        results = []
+        for appt in appointments:
+            doctor = session.get(Doctor, appt.doctor_id)
+            dept = session.get(Department, doctor.department_id) if doctor else None
+            meta = DOCTOR_METADATA.get(doctor.name, {}) if doctor else {}
+            
+            patients_ahead = 0
+            est_wait = 0.0
+            if appt.status == "pending" and doctor:
+                active_doctor_queue = get_sorted_doctor_appointments(session, doctor_id=appt.doctor_id, appointment_date=appt.appointment_date)
+                try:
+                    target_idx = next(i for i, a in enumerate(active_doctor_queue) if a.id == appt.id)
+                    patients_ahead = sum(1 for a in active_doctor_queue[:target_idx] if a.status == "pending")
+                except StopIteration:
+                    patients_ahead = 0
+                avg_consult = doctor.avg_consult_minutes or 10
+                delay_buf = doctor_delays.get(doctor.id, {}).get("delay_minutes", 0)
+                est_wait = round(patients_ahead * avg_consult * 0.9 + delay_buf, 1)
+
+            pat_row = session.get(Patient, appt.patient_id)
+            d_name = appt.beneficiary_name or (pat_row.name if pat_row else "Patient")
+            d_phone = appt.contact_phone or (pat_row.phone if pat_row else None)
+
+            results.append(
+                AppointmentResponse(
+                    id=appt.id,
+                    patient_id=appt.patient_id,
+                    doctor_id=appt.doctor_id,
+                    booked_time=appt.booked_time,
+                    status=appt.status,
+                    queue_position=appt.queue_position,
+                    tokenNumber=f"OPD-{appt.id:03d}",
+                    doctor=doctor.name if doctor else "General Medicine",
+                    department=dept.name if dept else "General Medicine",
+                    roomNo=meta.get("room", "Room 204"),
+                    time_slot=appt.time_slot or "09:30 AM",
+                    appointment_date=appt.appointment_date,
+                    patient_name=d_name,
+                    patient_age=appt.beneficiary_age,
+                    patient_gender=appt.beneficiary_gender,
+                    contact_phone=d_phone,
+                    is_dependent=bool(appt.is_dependent),
+                    patientsAhead=patients_ahead,
+                    estimatedWaitMinutes=est_wait,
+                )
+            )
+
+
+        return results
 
 
 @app.post("/appointments/{token_or_id}/cancel")
@@ -322,94 +697,280 @@ def cancel_appointment(token_or_id: str):
         }
 
 
+def sanitize_geocode_query(text: str) -> str:
+    cleaned = text.strip()
+    cleaned = re.sub(r',\s*(KA|Karnataka|India|IN)(\b.*)?$', '', cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r',\s*(KA|Karnataka|India|IN)(\b.*)?$', '', cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r'\s+(KA|Karnataka|India)\b', '', cleaned, flags=re.IGNORECASE)
+    return cleaned.strip()
+
+KNOWN_PINCODES = {
+    "577002": {"name": "Davanagere City / PB Road", "lat": 14.4644, "lng": 75.9218, "district": "Davanagere"},
+    "577001": {"name": "Davanagere Main / Gandhi Circle", "lat": 14.4589, "lng": 75.9192, "district": "Davanagere"},
+    "577004": {"name": "Davanagere Vidyanagar / MCC", "lat": 14.4750, "lng": 75.9320, "district": "Davanagere"},
+    "577005": {"name": "Davanagere Industrial Area", "lat": 14.4820, "lng": 75.9080, "district": "Davanagere"},
+    "577525": {"name": "Holalkere / Chitradurga Region", "lat": 14.0322, "lng": 76.1843, "district": "Chitradurga"},
+    "577501": {"name": "Chitradurga Fort City", "lat": 14.2251, "lng": 76.3980, "district": "Chitradurga"},
+    "577533": {"name": "Hosadurga Town", "lat": 13.7997, "lng": 76.2863, "district": "Chitradurga"},
+    "577544": {"name": "Hiriyur Town & Highway", "lat": 13.9554, "lng": 76.6186, "district": "Chitradurga"},
+    "577527": {"name": "Jagalur Town", "lat": 14.5204, "lng": 76.3475, "district": "Davanagere"},
+    "577522": {"name": "Channagiri Town", "lat": 14.0267, "lng": 75.9312, "district": "Davanagere"},
+    "577201": {"name": "Shivamogga City Center", "lat": 13.9299, "lng": 75.5681, "district": "Shivamogga"},
+    "577101": {"name": "Chikkamagaluru Town", "lat": 13.3161, "lng": 75.7720, "district": "Chikkamagaluru"},
+    "572101": {"name": "Tumakuru Town (B.H. Road / Mandipet)", "lat": 13.3409, "lng": 77.1010, "district": "Tumakuru"},
+    "572102": {"name": "Tumakuru SSMC / Heggere / Maralur", "lat": 13.3167, "lng": 77.0833, "district": "Tumakuru"},
+    "572103": {"name": "Tumakuru University / Batwadi", "lat": 13.3370, "lng": 77.1180, "district": "Tumakuru"},
+    "572104": {"name": "Tumakuru Kyatsandra / Siddaganga Math", "lat": 13.3150, "lng": 77.1520, "district": "Tumakuru"},
+    "572105": {"name": "Tumakuru SIT Extension / Ring Road", "lat": 13.3280, "lng": 77.1260, "district": "Tumakuru"},
+    "572106": {"name": "SIET Campus / Sira Road", "lat": 13.3792, "lng": 77.1004, "district": "Tumakuru"},
+    "572137": {"name": "Sira Town & Taluk", "lat": 13.7434, "lng": 76.9048, "district": "Tumakuru"},
+    "572216": {"name": "Gubbi Town & Taluk", "lat": 13.3111, "lng": 76.9405, "district": "Tumakuru"},
+    "572130": {"name": "Kunigal Town & National Highway", "lat": 13.0238, "lng": 77.0345, "district": "Tumakuru"},
+    "572201": {"name": "Tiptur Town (Kalpataru City)", "lat": 13.2555, "lng": 76.4784, "district": "Tumakuru"},
+    "572138": {"name": "Madhugiri Monolith Area", "lat": 13.6631, "lng": 77.2089, "district": "Tumakuru"},
+    "572129": {"name": "Koratagere Town & Taluk", "lat": 13.5233, "lng": 77.2378, "district": "Tumakuru"},
+    "572220": {"name": "Turuvekere Town", "lat": 13.1611, "lng": 76.6681, "district": "Tumakuru"},
+    "572128": {"name": "Pavagada Taluk", "lat": 14.1011, "lng": 77.2789, "district": "Tumakuru"},
+    "572214": {"name": "Chikkanayakanahalli", "lat": 13.4192, "lng": 76.6214, "district": "Tumakuru"},
+    "560023": {"name": "Bengaluru Majestic / City Center", "lat": 12.9767, "lng": 77.5713, "district": "Bengaluru Urban"},
+    "560057": {"name": "Bengaluru Peenya / Yeshwanthpur", "lat": 13.0285, "lng": 77.5197, "district": "Bengaluru Urban"},
+    "562123": {"name": "Nelamangala Highway Junction", "lat": 13.0975, "lng": 77.3916, "district": "Bengaluru Rural"},
+}
+
+
 @app.get("/geocode")
 def geocode_location(query: str):
     """
     Geocodes a pincode, locality name, or landmark using OpenRouteService Pelias Geocoder.
-    Returns latitude, longitude, label, and resolved metadata with fallback support.
+    Applies Karnataka regional bias, query sanitization, and candidate filtering.
     """
     clean_query = query.strip()
+    # Strip nested Location ( ... ) or Live Location ( ... ) wrappers recursively
+    while re.match(r"^(?:Location|Live Location|GPS Location)\s*\((.*)\)$", clean_query, flags=re.IGNORECASE):
+        clean_query = re.sub(r"^(?:Location|Live Location|GPS Location)\s*\((.*)\)$", r"\1", clean_query, flags=re.IGNORECASE).strip()
+
     if not clean_query:
         raise HTTPException(status_code=400, detail="Query parameter is required")
 
+    sanitized = sanitize_geocode_query(clean_query)
+
+    # 1. Known Pincode Match
+    if sanitized in KNOWN_PINCODES:
+        p = KNOWN_PINCODES[sanitized]
+        item = {
+            "name": p["name"],
+            "locality": p["name"],
+            "district": p["district"],
+            "lat": p["lat"],
+            "lng": p["lng"],
+            "isEstimated": False
+        }
+        return {
+            "success": True,
+            "query": clean_query,
+            "lat": item["lat"],
+            "lng": item["lng"],
+            "name": item["name"],
+            "district": item["district"],
+            "isEstimated": False,
+            "source": "pincode_db",
+            "results": [item]
+        }
+
+    # 2. Local Name Substring Matching in KNOWN_PINCODES (e.g. 'sira', 'tumakuru', 'davanagere')
+    local_matches = []
+    lower_query = sanitized.lower()
+    for pin, p in KNOWN_PINCODES.items():
+        if lower_query in p["name"].lower() or lower_query in p["district"].lower() or lower_query in pin:
+            local_matches.append({
+                "name": p["name"],
+                "locality": p["name"],
+                "district": p["district"],
+                "lat": p["lat"],
+                "lng": p["lng"],
+                "isEstimated": False,
+                "_exact": 1 if lower_query in p["name"].lower().split()[0] else 2
+            })
+    local_matches.sort(key=lambda x: x["_exact"])
+    for m in local_matches:
+        m.pop("_exact", None)
+
+    # If exact known local matches exist, return them directly
+    if local_matches:
+        primary = local_matches[0]
+        return {
+            "success": True,
+            "query": clean_query,
+            "lat": primary["lat"],
+            "lng": primary["lng"],
+            "name": primary["name"],
+            "district": primary["district"],
+            "isEstimated": False,
+            "source": "pincode_db",
+            "results": local_matches[:5]
+        }
+
+    results = []
     api_key = os.getenv("OPENROUTESERVICE_API_KEY")
     if api_key:
-        search_text = f"{clean_query} Karnataka, India" if clean_query.isdigit() and len(clean_query) == 6 else f"{clean_query}, India"
+        search_text = f"{sanitized}, Karnataka, India"
         url = "https://api.openrouteservice.org/geocode/search"
         params = {
             "api_key": api_key,
             "text": search_text,
-            "boundary.country": "IND"
+            "boundary.country": "IND",
+            "focus.point.lat": 13.3409,
+            "focus.point.lon": 77.1010,
+            "size": 8
+        }
+        try:
+            resp = requests.get(url, params=params, timeout=8)
+            if resp.status_code == 200:
+                features = resp.json().get("features", [])
+                for f in features:
+                    coords = f.get("geometry", {}).get("coordinates", [])
+                    props = f.get("properties", {})
+                    if len(coords) >= 2:
+                        c_lng, c_lat = coords[0], coords[1]
+                        # Discard generic country fallback coordinates (e.g. 79.0, 22.0)
+                        if abs(c_lat - 22.0) < 1.0 and abs(c_lng - 79.0) < 1.0:
+                            continue
+
+                        label = props.get("label") or props.get("name") or sanitized
+                        locality = props.get("locality") or props.get("name") or props.get("county") or ""
+                        district = props.get("county") or props.get("region") or "Karnataka"
+                        region = props.get("region") or ""
+
+                        # Filter out non-Karnataka states when Karnataka was requested
+                        is_out_of_state = any(st in region.lower() or st in label.lower() for st in ["kerala", "tamil nadu", "andhra", "telangana", "pondicherry", "puducherry", "maharashtra"])
+                        if is_out_of_state and "karnataka" not in region.lower():
+                            continue
+
+                        is_karnataka = "karnataka" in region.lower() or "karnataka" in label.lower()
+                        results.append({
+                            "name": label,
+                            "locality": locality,
+                            "district": district,
+                            "lat": c_lat,
+                            "lng": c_lng,
+                            "isEstimated": False,
+                            "_is_ka": is_karnataka
+                        })
+        except Exception as e:
+            print(f"[Geocode] ORS geocode error: {e}")
+
+    # Prioritize Karnataka matches
+    results.sort(key=lambda x: 0 if x.get("_is_ka") else 1)
+    for r in results:
+        r.pop("_is_ka", None)
+
+    if results:
+        primary = results[0]
+        return {
+            "success": True,
+            "query": clean_query,
+            "lat": primary["lat"],
+            "lng": primary["lng"],
+            "name": primary["name"],
+            "district": primary["district"],
+            "isEstimated": False,
+            "source": "openrouteservice",
+            "results": results
+        }
+
+    # Regional Fallbacks if ORS search yielded no features
+    fallback_item = None
+    if clean_query.startswith("577"):
+        fallback_item = {
+            "name": f"Davanagere / Central Karnataka ({clean_query})",
+            "district": "Davanagere",
+            "lat": 14.4589,
+            "lng": 75.9192,
+            "isEstimated": True
+        }
+    elif clean_query.startswith("572"):
+        fallback_item = {
+            "name": f"Tumakuru District ({clean_query})",
+            "district": "Tumakuru",
+            "lat": 13.3409,
+            "lng": 77.1010,
+            "isEstimated": True
+        }
+    elif clean_query.startswith("560") or clean_query.startswith("562"):
+        fallback_item = {
+            "name": f"Bengaluru Region ({clean_query})",
+            "district": "Bengaluru",
+            "lat": 13.0285,
+            "lng": 77.5197,
+            "isEstimated": True
+        }
+    else:
+        fallback_item = {
+            "name": f"{clean_query}",
+            "district": "Tumakuru",
+            "lat": 13.340881,
+            "lng": 77.100601,
+            "isEstimated": True
+        }
+
+    return {
+        "success": True,
+        "query": clean_query,
+        "lat": fallback_item["lat"],
+        "lng": fallback_item["lng"],
+        "name": fallback_item["name"],
+        "district": fallback_item["district"],
+        "isEstimated": True,
+        "source": "regional_fallback",
+        "results": [fallback_item]
+    }
+
+
+
+@app.get("/geocode/reverse")
+def reverse_geocode(lat: float, lng: float):
+    """
+    Reverse geocodes GPS coordinates (lat, lng) to a human-readable locality,
+    suburb, road, or district using OpenRouteService.
+    """
+    api_key = os.getenv("OPENROUTESERVICE_API_KEY")
+    if api_key:
+        url = "https://api.openrouteservice.org/geocode/reverse"
+        params = {
+            "api_key": api_key,
+            "point.lon": lng,
+            "point.lat": lat,
+            "size": 1
         }
         try:
             resp = requests.get(url, params=params, timeout=8)
             if resp.status_code == 200:
                 features = resp.json().get("features", [])
                 if features:
-                    f = features[0]
-                    coords = f.get("geometry", {}).get("coordinates", [])
-                    props = f.get("properties", {})
-                    if len(coords) >= 2:
-                        lng, lat = coords[0], coords[1]
-                        label = props.get("label") or props.get("name") or clean_query
-                        district = props.get("county") or props.get("region") or "Karnataka"
-                        return {
-                            "success": True,
-                            "query": clean_query,
-                            "lat": lat,
-                            "lng": lng,
-                            "name": label,
-                            "district": district,
-                            "isEstimated": False,
-                            "source": "openrouteservice"
-                        }
+                    p = features[0].get("properties", {})
+                    label = p.get("label") or p.get("name") or "Tumakuru Vicinity"
+                    locality = p.get("locality") or p.get("name") or p.get("county") or "Tumakuru"
+                    district = p.get("county") or p.get("region") or "Karnataka"
+                    return {
+                        "success": True,
+                        "formatted_address": label,
+                        "locality": locality,
+                        "district": district,
+                        "lat": lat,
+                        "lng": lng,
+                        "source": "openrouteservice"
+                    }
         except Exception as e:
-            print(f"[Geocode] ORS geocode error: {e}")
-
-    # Fallback to Karnataka regional centroids
-    if clean_query.startswith("572"):
-        return {
-            "success": True,
-            "query": clean_query,
-            "lat": 13.3409,
-            "lng": 77.1010,
-            "name": f"Tumakuru District ({clean_query})",
-            "district": "Tumakuru",
-            "isEstimated": True,
-            "source": "regional_fallback"
-        }
-    elif clean_query.startswith("560") or clean_query.startswith("562"):
-        return {
-            "success": True,
-            "query": clean_query,
-            "lat": 13.0285,
-            "lng": 77.5197,
-            "name": f"Bengaluru Region ({clean_query})",
-            "district": "Bengaluru",
-            "isEstimated": True,
-            "source": "regional_fallback"
-        }
-    elif clean_query.startswith("577"):
-        return {
-            "success": True,
-            "query": clean_query,
-            "lat": 14.2285,
-            "lng": 76.3992,
-            "name": f"Central Karnataka Region ({clean_query})",
-            "district": "Chitradurga",
-            "isEstimated": True,
-            "source": "regional_fallback"
-        }
+            print(f"[ReverseGeocode] ORS error: {e}")
 
     return {
         "success": True,
-        "query": clean_query,
-        "lat": 13.340881,
-        "lng": 77.100601,
-        "name": f"Location ({clean_query})",
+        "formatted_address": f"GPS Location ({lat:.4f}, {lng:.4f})",
+        "locality": "Tumakuru Vicinity",
         "district": "Tumakuru",
-        "isEstimated": True,
-        "source": "default_fallback"
+        "lat": lat,
+        "lng": lng,
+        "source": "fallback"
     }
     
 
@@ -487,7 +1048,7 @@ def send_automated_sms(phone: str, message: str) -> dict:
 @app.post("/departure-check", response_model=DepartureCheckResponse)
 def check_departure_time(
     request: DepartureCheckRequest,
-    current_user: dict = Depends(get_current_user),
+    current_user: Optional[dict] = Depends(get_optional_current_user),
 ):
     """
     The core "leave now" decision logic (paper Section 4.4).
@@ -496,13 +1057,23 @@ def check_departure_time(
     TRAVEL TIME + 10-MINUTE SAFETY BUFFER to the hospital.
     A notification is triggered once travel_time + 10 >= predicted_wait,
     ensuring the patient arrives comfortably before their token is called.
+    Supports authenticated patients, demo users, and public estimation.
     """
-    patient_id = int(current_user["sub"])
+    patient_id = None
+    if current_user and "sub" in current_user:
+        try:
+            patient_id = int(current_user["sub"])
+        except (ValueError, TypeError):
+            patient_id = None
 
     with Session(engine) as session:
-        appointment = session.get(Appointment, request.appointment_id) if request.appointment_id else None
+        auto_expire_past_appointments(session)
 
-        if not appointment:
+        appointment = None
+        if request.appointment_id:
+            appointment = session.get(Appointment, request.appointment_id)
+
+        if not appointment and patient_id:
             # Fallback to the patient's active pending appointment if ID is omitted or 0
             appointment = session.exec(
                 select(Appointment).where(
@@ -512,42 +1083,51 @@ def check_departure_time(
             ).first()
 
         if not appointment:
-            raise HTTPException(status_code=404, detail="Appointment not found")
-        if appointment.patient_id != patient_id:
-            raise HTTPException(status_code=403, detail="Not your appointment")
+            # Fallback for Demo Mode or unauthenticated preview: pick first pending or latest appointment
+            appointment = session.exec(
+                select(Appointment).where(Appointment.status == "pending")
+            ).first()
+            if not appointment:
+                appointment = session.exec(select(Appointment)).first()
 
-        doctor = session.get(Doctor, appointment.doctor_id)
+        doctor = None
+        if appointment and appointment.doctor_id:
+            doctor = session.get(Doctor, appointment.doctor_id)
         if not doctor:
-            raise HTTPException(status_code=404, detail="Doctor not found")
+            doctor = session.exec(select(Doctor)).first()
 
-        # Fetch department so the ML model activates its trained department dummy column
-        department = session.get(Department, doctor.department_id)
-        department_name = department.name if department else ""
+        department_name = "General Medicine"
+        if doctor and doctor.department_id:
+            department = session.get(Department, doctor.department_id)
+            if department:
+                department_name = department.name
 
         # Count real-time patients ahead, same logic as queue-status endpoint
-        appt_pos = appointment.queue_position if appointment.queue_position is not None else 999
-        patients_ahead = len(
-            session.exec(
-                select(Appointment).where(
-                    Appointment.doctor_id == appointment.doctor_id,
-                    Appointment.status == "pending",
-                    Appointment.queue_position < appt_pos,
-                )
-            ).all()
-        )
+        patients_ahead = 3
+        if appointment and appointment.doctor_id:
+            appt_pos = appointment.queue_position if appointment.queue_position is not None else 999
+            patients_ahead = len(
+                session.exec(
+                    select(Appointment).where(
+                        Appointment.doctor_id == appointment.doctor_id,
+                        Appointment.status == "pending",
+                        Appointment.queue_position < appt_pos,
+                    )
+                ).all()
+            )
 
         # Use today's actual day/hour so the ML prediction reflects right now
         now = datetime.utcnow()
         day_name = now.strftime("%A")
 
-        # In our dataset, doctors are labeled 'DOC1' through 'DOC6'.
-        doctor_code = f"DOC{doctor.id}"
+        doctor_code = f"DOC{doctor.id}" if doctor else "DOC1"
+        doctor_avg_consult = doctor.avg_consult_minutes if doctor else 15
 
         # Tier 1: Statistical ML baseline prediction (Random Forest)
         ml_prediction = predict_wait(
             doctor_id=doctor_code,
             department=department_name,
-            doctor_avg_consult_minutes=doctor.avg_consult_minutes,
+            doctor_avg_consult_minutes=doctor_avg_consult,
             day_of_week=day_name,
             hour_of_day=now.hour,
             queue_length_ahead=patients_ahead,
@@ -556,15 +1136,27 @@ def check_departure_time(
         base_predicted_wait = float(ml_prediction["predicted_minutes"])
 
         # Tier 2: Real-time operational delay overlay (staff disruption buffer)
-        predicted_wait = apply_operational_delay_overlay(base_predicted_wait, doctor.id)
+        doctor_id_val = doctor.id if doctor else 1
+        predicted_wait = apply_operational_delay_overlay(base_predicted_wait, doctor_id_val)
 
-        travel_time = get_travel_time_minutes(
+        ors_details = get_ors_travel_details(
             request.patient_lat, request.patient_lng, HOSPITAL_LAT, HOSPITAL_LNG
         )
+        travel_time = int(round(ors_details.get("duration_minutes", 10.0)))
+        distance_km = float(ors_details.get("distance_km", 4.8))
 
         # Safety Buffer Logic: 10 minutes allocated for parking, walking, and check-in
         SAFETY_BUFFER_MINUTES = 10
         should_leave = (travel_time + SAFETY_BUFFER_MINUTES) >= predicted_wait
+
+        if appointment and appointment.status == "expired":
+            return DepartureCheckResponse(
+                predicted_wait_minutes=0.0,
+                travel_time_minutes=travel_time,
+                should_leave_now=False,
+                message="Hospital OPD operations closed at 8:00 PM. Appointment slot expired. Please schedule an appointment for tomorrow.",
+                distance_km=distance_km
+            )
 
         if should_leave:
             message = (
@@ -576,33 +1168,85 @@ def check_departure_time(
             message = f"Not yet — with a 10-min safety buffer, you can wait {buffer:.0f} more minutes before leaving."
 
         # Automated SMS Trigger: Fires ONCE per appointment when should_leave first becomes True
-        if should_leave and not getattr(appointment, "departure_notified", False):
-            patient = session.get(Patient, appointment.patient_id)
-            if patient and patient.phone:
+        if should_leave and appointment and not getattr(appointment, "departure_notified", False):
+            patient = session.get(Patient, appointment.patient_id) if appointment.patient_id else None
+            target_phone = appointment.contact_phone or (patient.phone if patient else None)
+            attendee_name = appointment.beneficiary_name or (patient.name if patient else "Patient")
+            if target_phone:
                 token_str = f"OPD-{appointment.id:03d}"
+                doc_name = doctor.name if doctor else "Doctor"
                 sms_body = (
-                    f"[Shridevi Hospital] Token {token_str}: "
-                    f"Leave now! With 10m buffer, visit with {doctor.name} starts in {int(predicted_wait)}m "
+                    f"[Shridevi Hospital] Token {token_str} ({attendee_name}): "
+                    f"Leave now! With 10m buffer, visit with {doc_name} starts in {int(predicted_wait)}m "
                     f"(Travel: {int(travel_time)}m)."
                 )
-                sms_res = send_automated_sms(patient.phone, sms_body)
+                sms_res = send_automated_sms(target_phone, sms_body)
                 if sms_res.get("success"):
                     appointment.departure_notified = True
                     session.add(appointment)
                     session.commit()
                     session.refresh(appointment)
 
+
         return DepartureCheckResponse(
             predicted_wait_minutes=predicted_wait,
             travel_time_minutes=travel_time,
             should_leave_now=should_leave,
             message=message,
+            distance_km=distance_km,
         )
 
 
 # =====================================================================
 # FRONTEND BRIDGE ROUTES (Laxuman & Naveen React Compatibility Layer)
 # =====================================================================
+
+@app.post("/auth/register", status_code=status.HTTP_201_CREATED, response_model=AuthRegisterResponse)
+def auth_register(request: AuthRegisterRequest):
+    """
+    Standard patient signup endpoint.
+    Creates a new patient account with Full Name, 10-digit Phone, and Bcrypt-hashed password.
+    """
+    raw_name = request.fullName or request.name
+    if not raw_name or len(raw_name.strip()) < 2:
+        raise HTTPException(status_code=400, detail="Full name must be at least 2 characters")
+    
+    clean_phone = re.sub(r"\D", "", str(request.phone or ""))
+    if len(clean_phone) > 10 and clean_phone.startswith("91"):
+        clean_phone = clean_phone[2:]
+    if len(clean_phone) != 10:
+        raise HTTPException(status_code=400, detail="Mobile number must be exactly 10 digits")
+        
+    if not request.password or len(request.password) < 6:
+        raise HTTPException(status_code=400, detail="Password must be at least 6 characters")
+
+    with Session(engine) as session:
+        # Check if phone number is already registered
+        existing_phone = session.exec(
+            select(Patient).where(Patient.phone == clean_phone)
+        ).first()
+        if existing_phone:
+            raise HTTPException(status_code=400, detail="Mobile number is already registered. Please sign in.")
+
+        email_val = request.email.strip() if request.email else f"{clean_phone}@mediflow.patient"
+        new_patient = Patient(
+            name=raw_name.strip(),
+            phone=clean_phone,
+            email=email_val,
+            password_hash=hash_password(request.password),
+        )
+        session.add(new_patient)
+        session.commit()
+        session.refresh(new_patient)
+
+        return AuthRegisterResponse(
+            success=True,
+            message="Patient account created successfully! Please sign in.",
+            patient_id=new_patient.id,
+            name=new_patient.name,
+            phone=new_patient.phone,
+        )
+
 
 @app.post("/auth/login", response_model=FrontendLoginResponse)
 def frontend_login(request: FrontendLoginRequest):
@@ -628,23 +1272,97 @@ def frontend_login(request: FrontendLoginRequest):
         appt = session.exec(
             select(Appointment).where(
                 Appointment.patient_id == patient.id,
-                Appointment.status == "pending",
+                Appointment.status.in_(["pending", "serving"]),
             ).order_by(Appointment.id.desc())
         ).first()
+
+        user_data = {
+            "id": patient.id,
+            "name": patient.name,
+            "phone": patient.phone,
+            "email": patient.email,
+            "appointment_id": appt.id if appt else None,
+            "tokenNumber": f"OPD-{appt.id:03d}" if appt else None,
+            "numericToken": appt.id if appt else None,
+        }
+
+        if appt:
+            doc = session.get(Doctor, appt.doctor_id)
+            dept = session.get(Department, doc.department_id) if doc else None
+            meta = DOCTOR_METADATA.get(doc.name, {}) if doc else {}
+            user_data.update({
+                "doctor": doc.name if doc else None,
+                "doctorId": f"doc-{doc.id}" if doc else None,
+                "department": dept.name if dept else None,
+                "roomNo": meta.get("room", "Room 204"),
+            })
 
         return FrontendLoginResponse(
             success=True,
             token=access_token,
-            user={
-                "id": patient.id,
-                "name": patient.name,
-                "phone": patient.phone,
-                "email": patient.email,
-                "appointment_id": appt.id if appt else None,
-                "tokenNumber": f"OPD-{appt.queue_position or appt.id:03d}" if appt else "OPD-001",
-                "numericToken": appt.queue_position or (appt.id if appt else 1),
-            },
+            user=user_data,
         )
+
+
+@app.post("/auth/forgot-password/request", response_model=ForgotPasswordResponse)
+def request_forgot_password_otp(request: ForgotPasswordRequest):
+    """
+    Step 1 of Forgot Password flow:
+    Validates 10-digit mobile number, verifies account exists, and returns a Virtual OTP (123456).
+    """
+    clean_phone = re.sub(r"\D", "", str(request.phone or ""))
+    if len(clean_phone) > 10 and clean_phone.startswith("91"):
+        clean_phone = clean_phone[2:]
+    if len(clean_phone) != 10:
+        raise HTTPException(status_code=400, detail="Please enter a valid 10-digit Indian mobile number")
+
+    with Session(engine) as session:
+        patient = session.exec(select(Patient).where(Patient.phone == clean_phone)).first()
+        if not patient:
+            raise HTTPException(status_code=404, detail="No patient account registered with this mobile number")
+
+        return ForgotPasswordResponse(
+            success=True,
+            message="Verification OTP sent successfully!",
+            otp="123456"
+        )
+
+
+@app.post("/auth/forgot-password/reset", response_model=ForgotPasswordResponse)
+def reset_forgot_password(request: ForgotPasswordResetRequest):
+    """
+    Step 2 of Forgot Password flow:
+    Verifies virtual OTP (123456), enforces min 6 character password, hashes with bcrypt and updates DB.
+    """
+    clean_phone = re.sub(r"\D", "", str(request.phone or ""))
+    if len(clean_phone) > 10 and clean_phone.startswith("91"):
+        clean_phone = clean_phone[2:]
+    if len(clean_phone) != 10:
+        raise HTTPException(status_code=400, detail="Invalid 10-digit mobile number")
+
+    clean_otp = str(request.otp or "").strip()
+    if clean_otp != "123456":
+        raise HTTPException(status_code=400, detail="Invalid verification code. Please enter 123456.")
+
+    if not request.newPassword or len(request.newPassword) < 6:
+        raise HTTPException(status_code=400, detail="New password must be at least 6 characters long")
+
+    with Session(engine) as session:
+        patients = session.exec(select(Patient).where(Patient.phone == clean_phone)).all()
+        if not patients:
+            raise HTTPException(status_code=404, detail="Patient account not found")
+
+        new_hash = hash_password(request.newPassword)
+        for p in patients:
+            p.password_hash = new_hash
+            session.add(p)
+        session.commit()
+
+        return ForgotPasswordResponse(
+            success=True,
+            message="Password reset successfully! Please sign in with your new password."
+        )
+
 
 
 @app.post("/patients/register")
@@ -654,6 +1372,11 @@ def frontend_register(request: FrontendRegisterRequest):
     Creates account and auto-books an appointment so the dashboard works out-of-the-box.
     """
     patient_name = request.fullName or request.name or "Patient"
+    now_ist = datetime.now(IST)
+    today_ist = now_ist.strftime("%Y-%m-%d")
+    chosen_date = request.appointmentDate or today_ist
+    chosen_slot = request.appointmentTime or "10:30 AM"
+
     with Session(engine) as session:
         patient = session.exec(
             select(Patient).where(Patient.email == request.email)
@@ -677,7 +1400,7 @@ def frontend_register(request: FrontendRegisterRequest):
 
         existing_count = len(
             session.exec(
-                select(Appointment).where(
+                select(Appointment.id).where(
                     Appointment.doctor_id == doc_id,
                     Appointment.status == "pending",
                 )
@@ -687,13 +1410,25 @@ def frontend_register(request: FrontendRegisterRequest):
         appointment = Appointment(
             patient_id=patient.id,
             doctor_id=doc_id,
-            booked_time=datetime.utcnow(),
+            booked_time=now_ist.replace(tzinfo=None),
             status="pending",
             queue_position=existing_count + 1,
+            time_slot=chosen_slot,
+            appointment_date=chosen_date,
         )
         session.add(appointment)
         session.commit()
         session.refresh(appointment)
+
+        patients_ahead = len(
+            session.exec(
+                select(Appointment.id).where(
+                    Appointment.doctor_id == doc_id,
+                    Appointment.status == "pending",
+                    Appointment.id < appointment.id,
+                )
+            ).all()
+        )
 
         dept = session.get(Department, doctor.department_id) if doctor else None
         dept_name = dept.name if dept else "General Medicine"
@@ -702,7 +1437,7 @@ def frontend_register(request: FrontendRegisterRequest):
         token_num = appointment.id
         token_str = f"OPD-{token_num:03d}"
         access_token = create_access_token(data={"sub": str(patient.id)})
-        est_wait = round(existing_count * (doctor.avg_consult_minutes if doctor else 15) * 0.85, 1)
+        est_wait = round(patients_ahead * (doctor.avg_consult_minutes if doctor else 15) * 0.85, 1)
 
         return {
             "success": True,
@@ -718,15 +1453,16 @@ def frontend_register(request: FrontendRegisterRequest):
                 "appointment_id": appointment.id,
                 "tokenNumber": token_str,
                 "numericToken": token_num,
-                "currentToken": f"OPD-{max(1, token_num - existing_count):03d}",
-                "patientsAhead": existing_count,
+                "currentToken": f"OPD-{max(1, token_num - patients_ahead):03d}",
+                "patientsAhead": patients_ahead,
                 "estimatedWaitMinutes": est_wait,
                 "doctor": doctor.name if doctor else "Dr. Rajeswari R.",
                 "doctorId": f"doc-{doctor.id}" if doctor else "doc-1",
                 "department": dept_name,
                 "roomNo": meta.get("room", "Room 204"),
-                "appointmentTime": request.appointmentTime or "10:30 AM",
-                "appointmentDate": request.appointmentDate or datetime.utcnow().strftime("%Y-%m-%d"),
+                "appointmentTime": chosen_slot,
+                "time_slot": chosen_slot,
+                "appointmentDate": chosen_date,
                 "symptoms": request.symptoms or "Routine consultation",
             },
         }
@@ -744,6 +1480,21 @@ def book_patient_appointment(
     Writes directly to Neon PostgreSQL appointment table so it immediately
     appears in staff-dashboard live queue.
     """
+    now_ist = datetime.now(IST)
+    today_ist = now_ist.strftime("%Y-%m-%d")
+    chosen_date = req.date or today_ist
+    chosen_slot = req.time_slot or req.timeSlot or "09:30 AM"
+
+    # Reject past slots if booking for today
+    if chosen_date == today_ist:
+        slot_mins = parse_slot_time_to_minutes(chosen_slot)
+        curr_mins = now_ist.hour * 60 + now_ist.minute
+        if slot_mins is not None and slot_mins <= curr_mins:
+            raise HTTPException(
+                status_code=400,
+                detail="Selected time slot has already passed."
+            )
+
     with Session(engine) as session:
         # Determine Patient
         patient = None
@@ -751,12 +1502,13 @@ def book_patient_appointment(
         if auth_header and auth_header.startswith("Bearer "):
             raw_token = auth_header.split(" ")[1]
             try:
-                from auth import decode_access_token
-                payload = decode_access_token(raw_token)
+                from auth import verify_access_token
+                payload = verify_access_token(raw_token)
                 if payload and "sub" in payload:
                     patient = session.get(Patient, int(payload["sub"]))
-            except Exception:
-                pass
+            except Exception as e:
+                print(f"[Auth] Token decode error in book_patient_appointment: {e}")
+
 
         if not patient and req.email:
             patient = session.exec(select(Patient).where(Patient.email == req.email)).first()
@@ -786,47 +1538,132 @@ def book_patient_appointment(
         dept_name = dept.name if dept else "General Medicine"
         meta = DOCTOR_METADATA.get(doctor.name, {})
 
+        # Extract attendee details
+        is_dep = bool(req.is_dependent)
+        beneficiary_name = req.patient_name or req.beneficiary_name or (patient.name if not is_dep else None)
+        beneficiary_age = req.patient_age or req.beneficiary_age or 35
+        beneficiary_gender = req.patient_gender or req.beneficiary_gender or "Male"
+        contact_phone = req.contact_phone or patient.phone
+
+        # Idempotency / Duplicate Booking Guard
+        if is_dep:
+            dep_clean_name = (beneficiary_name or "").strip().lower()
+            dep_clean_phone = (contact_phone or "").strip()
+            existing_active = session.exec(
+                select(Appointment).where(
+                    Appointment.patient_id == patient.id,
+                    Appointment.doctor_id == doctor.id,
+                    Appointment.appointment_date == chosen_date,
+                    Appointment.is_dependent == True,
+                    func.lower(Appointment.beneficiary_name) == dep_clean_name,
+                    Appointment.contact_phone == dep_clean_phone,
+                    Appointment.status.in_(["pending", "serving"])
+                )
+            ).first()
+            if existing_active:
+                token_str = f"OPD-{existing_active.id:03d}"
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail=f"An active appointment ({token_str}) already exists for {beneficiary_name} with {doctor.name} on {chosen_date}."
+                )
+        else:
+            existing_active = session.exec(
+                select(Appointment).where(
+                    Appointment.patient_id == patient.id,
+                    Appointment.doctor_id == doctor.id,
+                    Appointment.appointment_date == chosen_date,
+                    Appointment.is_dependent == False,
+                    Appointment.status.in_(["pending", "serving"])
+                )
+            ).first()
+            if existing_active:
+                token_str = f"OPD-{existing_active.id:03d}"
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail=f"You already have an active personal appointment ({token_str}) booked with {doctor.name} for {chosen_date}."
+                )
+
         existing_count = len(
             session.exec(
-                select(Appointment).where(
+                select(Appointment.id).where(
                     Appointment.doctor_id == doctor.id,
                     Appointment.status == "pending",
                 )
             ).all()
         )
 
+
         appointment = Appointment(
             patient_id=patient.id,
             doctor_id=doctor.id,
-            booked_time=datetime.utcnow(),
+            booked_time=now_ist.replace(tzinfo=None),
             status="pending",
             queue_position=existing_count + 1,
+            time_slot=chosen_slot,
+            appointment_date=chosen_date,
+            beneficiary_name=beneficiary_name,
+            beneficiary_age=beneficiary_age,
+            beneficiary_gender=beneficiary_gender,
+            contact_phone=contact_phone,
+            is_dependent=is_dep,
         )
         session.add(appointment)
         session.commit()
         session.refresh(appointment)
 
+        # Strict accurate calculation of patients ahead in line based on slot chronological sorting
+        active_doctor_queue = get_sorted_doctor_appointments(session, doctor_id=doctor.id, appointment_date=chosen_date)
+        try:
+            target_idx = next(i for i, a in enumerate(active_doctor_queue) if a.id == appointment.id)
+            patients_ahead = sum(1 for a in active_doctor_queue[:target_idx] if a.status == "pending")
+            calculated_pos = target_idx + 1
+        except StopIteration:
+            patients_ahead = 0
+            calculated_pos = 1
+
+        appointment.queue_position = calculated_pos
+        session.add(appointment)
+        session.commit()
+
+        display_attendee = beneficiary_name or patient.name
+        # Stage 1 Lifecycle Trigger: Booking Confirmed Notification
+        create_patient_notification(
+            session=session,
+            patient_id=patient.id,
+            notif_type="booking_confirmed",
+            title="✅ Appointment Confirmed",
+            message=f"Appointment Confirmed for {display_attendee} ({chosen_slot}) with {doctor.name}. You have {patients_ahead} patients ahead of you.",
+            severity="success"
+        )
+
         token_num = appointment.id
         token_str = f"OPD-{token_num:03d}"
-        est_wait = round(existing_count * doctor.avg_consult_minutes * 0.85, 1)
+        est_wait = round(patients_ahead * doctor.avg_consult_minutes * 0.85, 1)
 
         patient_payload = {
             "id": f"P-{patient.id:05d}",
             "name": patient.name,
             "phone": patient.phone,
             "email": patient.email,
+            "patient_name": display_attendee,
+            "patient_age": beneficiary_age,
+            "patient_gender": beneficiary_gender,
+            "contact_phone": contact_phone,
+            "is_dependent": is_dep,
             "appointment_id": appointment.id,
             "tokenNumber": token_str,
             "numericToken": token_num,
-            "currentToken": f"OPD-{max(1, token_num - existing_count):03d}",
-            "patientsAhead": existing_count,
+            "currentToken": f"OPD-{max(1, token_num - patients_ahead):03d}",
+            "patientsAhead": patients_ahead,
             "estimatedWaitMinutes": est_wait,
             "doctor": doctor.name,
             "doctorId": f"doc-{doctor.id}",
             "department": dept_name,
             "roomNo": meta.get("room", "Room 204"),
-            "appointmentTime": req.timeSlot or req.time_slot or "10:30 AM",
-            "appointmentDate": req.date or datetime.utcnow().strftime("%Y-%m-%d"),
+            "appointmentTime": chosen_slot,
+            "time_slot": chosen_slot,
+            "timeSlot": chosen_slot,
+            "appointmentDate": chosen_date,
             "symptoms": req.symptoms or "Routine consultation",
         }
 
@@ -836,15 +1673,24 @@ def book_patient_appointment(
             appointment_id=appointment.id,
             tokenNumber=token_str,
             numericToken=token_num,
-            currentToken=f"OPD-{max(1, token_num - existing_count):03d}",
-            patientsAhead=existing_count,
+            currentToken=f"OPD-{max(1, token_num - patients_ahead):03d}",
+            patientsAhead=patients_ahead,
             estimatedWaitMinutes=est_wait,
             doctor=doctor.name,
             department=dept_name,
             roomNo=meta.get("room", "Room 204"),
-            booked_time=datetime.utcnow().strftime("%I:%M %p"),
+            booked_time=now_ist.strftime("%I:%M %p"),
+            time_slot=chosen_slot,
+            timeSlot=chosen_slot,
+            appointment_date=chosen_date,
+            patient_name=display_attendee,
+            patient_age=beneficiary_age,
+            patient_gender=beneficiary_gender,
+            contact_phone=contact_phone,
+            is_dependent=is_dep,
             patient=patient_payload,
         )
+
 
 
 
@@ -893,88 +1739,324 @@ def update_patient_profile(updates: dict, current_user: dict = Depends(get_curre
 @app.get("/queue/status/{token_identifier}", response_model=FrontendQueueStatusResponse)
 def get_frontend_queue_status(token_identifier: str):
     """
-    Compatibility route for Laxuman's QueueCard and ProgressCard components.
+    Live queue status route for Laxuman's QueueCard and ProgressCard components.
     Accepts appointment IDs (e.g. '4') or token labels (e.g. 'OPD-004').
+    Dynamically binds to the booked doctor, department, assigned room, and live serving token.
     """
-    with Session(engine) as session:
-        clean_id = "".join(filter(str.isdigit, token_identifier))
-        appt_id = int(clean_id) if clean_id else 1
+    clean_id = "".join(filter(str.isdigit, str(token_identifier or "")))
+    if not clean_id:
+        raise HTTPException(status_code=400, detail="Invalid token or appointment identifier")
 
+    appt_id = int(clean_id)
+
+    with Session(engine) as session:
+        auto_expire_past_appointments(session)
         appointment = session.get(Appointment, appt_id)
         if not appointment:
-            appointment = session.exec(select(Appointment)).first()
+            appointment = session.exec(
+                select(Appointment).where(Appointment.queue_position == appt_id)
+            ).first()
 
         if not appointment:
-            raise HTTPException(status_code=404, detail="No active appointment found")
+            raise HTTPException(status_code=404, detail=f"No active appointment found for token #{token_identifier}")
 
         doctor = session.get(Doctor, appointment.doctor_id)
-        department = session.get(Department, doctor.department_id) if doctor else None
+        if not doctor:
+            doctor = session.exec(select(Doctor)).first()
 
-        appt_pos = appointment.queue_position if appointment.queue_position is not None else 999
-        patients_ahead = len(
-            session.exec(
-                select(Appointment).where(
-                    Appointment.doctor_id == appointment.doctor_id,
-                    Appointment.status == "pending",
-                    Appointment.queue_position < appt_pos,
-                )
-            ).all()
-        )
+        dept = session.get(Department, doctor.department_id) if (doctor and doctor.department_id) else None
+        dept_name = dept.name if dept else "General Medicine"
+        meta = DOCTOR_METADATA.get(doctor.name, {}) if doctor else {}
+        now_str = datetime.utcnow().strftime("%I:%M %p")
 
-        current_num = max(1, (appointment.queue_position or 1) - patients_ahead)
-        avg_consult = doctor.avg_consult_minutes if doctor else 15
+        if appointment.status in ["expired", "cancelled", "completed"]:
+            return FrontendQueueStatusResponse(
+                tokenNumber=f"OPD-{appointment.id:03d}",
+                currentToken="OPD-CLOSED" if appointment.status == "expired" else f"OPD-{appointment.id:03d}",
+                numericToken=appointment.id,
+                patientsAhead=0,
+                estimatedWaitMinutes=0.0,
+                doctor=doctor.name if doctor else "General Medicine",
+                department=dept_name,
+                roomNo=meta.get("room", "Room 204"),
+                emergencyCount=0,
+                lastUpdated=now_str,
+            )
+
+        active_doctor_queue = get_sorted_doctor_appointments(session, doctor_id=appointment.doctor_id, appointment_date=appointment.appointment_date)
+        try:
+            target_idx = next(i for i, a in enumerate(active_doctor_queue) if a.id == appointment.id)
+            patients_ahead = sum(1 for a in active_doctor_queue[:target_idx] if a.status == "pending")
+        except StopIteration:
+            patients_ahead = 0
+
+        serving_appt = next((a for a in active_doctor_queue if a.status == "serving"), None)
+        if serving_appt:
+            serving_token_str = f"OPD-{serving_appt.id:03d}"
+        elif active_doctor_queue:
+            serving_token_str = f"OPD-{active_doctor_queue[0].id:03d}"
+        else:
+            serving_token_str = f"OPD-{appointment.id:03d}"
+
+        avg_consult = doctor.avg_consult_minutes if doctor else 10
         delay_buf = doctor_delays.get(doctor.id, {}).get("delay_minutes", 0) if doctor else 0
         est_wait = round(patients_ahead * avg_consult * 0.9 + delay_buf, 1)
 
-        now_str = datetime.utcnow().strftime("%I:%M %p")
-
         return FrontendQueueStatusResponse(
-            tokenNumber=f"OPD-{appointment.queue_position or appt_id:03d}",
-            currentToken=f"OPD-{current_num:03d}",
-            numericToken=appointment.queue_position or appt_id,
+            tokenNumber=f"OPD-{appointment.id:03d}",
+            currentToken=serving_token_str,
+            numericToken=appointment.id,
             patientsAhead=patients_ahead,
             estimatedWaitMinutes=est_wait,
-            doctor=doctor.name if doctor else "Dr. Priya Sharma",
-            department=department.name if department else "Cardiology",
-            roomNo="Room 102",
+            doctor=doctor.name if doctor else "General Medicine",
+            department=dept_name,
+            roomNo=meta.get("room", "Room 204"),
             emergencyCount=0,
             lastUpdated=now_str,
         )
 
 
+@app.get("/queue/doctor/{doctor_id}", response_model=DoctorQueueStreamResponse)
+def get_doctor_queue_stream(doctor_id: int):
+    """
+    Returns live OPD queue stream specifically for the requested doctor:
+    - doctor metadata (name, department, room)
+    - servingToken (e.g. 'OPD-004' or None if queue is empty)
+    - patientsInQueue (count of active pending/serving appointments)
+    - queue: list of real active/recent appointments for this doctor
+    """
+    with Session(engine) as session:
+        auto_expire_past_appointments(session)
+        doctor = None
+        if doctor_id and doctor_id > 0:
+            doctor = session.get(Doctor, doctor_id)
+        if not doctor:
+            doctor = session.exec(select(Doctor)).first()
+            if not doctor:
+                raise HTTPException(status_code=404, detail="No doctors registered in database")
 
+        dept = session.get(Department, doctor.department_id) if doctor.department_id else None
+        dept_name = dept.name if dept else "General Medicine"
+        meta = DOCTOR_METADATA.get(doctor.name, {})
+
+        active_appts = get_sorted_doctor_appointments(session, doctor_id=doctor.id)
+
+        recent_completed = session.exec(
+            select(Appointment)
+            .where(
+                Appointment.doctor_id == doctor.id,
+                Appointment.status == "completed"
+            )
+            .order_by(Appointment.id.desc())
+        ).all()[:3]
+
+        all_stream = active_appts + recent_completed
+        patients = {p.id: p for p in session.exec(select(Patient)).all()}
+
+        serving_appt = next((a for a in active_appts if a.status == "serving"), None)
+        serving_token = f"OPD-{serving_appt.id:03d}" if serving_appt else (f"OPD-{active_appts[0].id:03d}" if active_appts else None)
+
+        queue_items = []
+        for a in all_stream:
+            pat = patients.get(a.patient_id)
+            p_name = a.beneficiary_name or (pat.name if pat else f"Patient #{a.patient_id}")
+            
+            if a.status == "serving":
+                w_time = "Serving Now"
+            elif a.status == "completed":
+                w_time = "Completed"
+            else:
+                try:
+                    target_idx = next(i for i, other in enumerate(active_appts) if other.id == a.id)
+                    pts_ahead = sum(1 for other in active_appts[:target_idx] if other.status == "pending")
+                except StopIteration:
+                    pts_ahead = 0
+                w_time = f"{int(pts_ahead * (doctor.avg_consult_minutes or 10))}m"
+
+            queue_items.append(
+                DoctorQueueStreamItem(
+                    id=a.id,
+                    tokenNumber=f"OPD-{a.id:03d}",
+                    numericToken=a.id,
+                    patient_name=p_name,
+                    status=a.status,
+                    queue_position=a.queue_position,
+                    booked_time=a.booked_time.strftime("%I:%M %p") if a.booked_time else "Now",
+                    waitTime=w_time,
+                )
+            )
+
+        return DoctorQueueStreamResponse(
+            doctor_id=doctor.id,
+            doctor=doctor.name,
+            department=dept_name,
+            roomNo=meta.get("room", "Room 204"),
+            avg_consult_minutes=doctor.avg_consult_minutes or 10,
+            servingToken=serving_token,
+            patientsInQueue=len(active_appts),
+            queue=queue_items,
+        )
+
+
+
+
+
+def create_patient_notification(
+    session: Session,
+    patient_id: Optional[int],
+    notif_type: str,
+    title: str,
+    message: str,
+    severity: str = "info"
+) -> Optional[Notification]:
+    """
+    Persists a lifecycle notification event into the Notification table.
+    """
+    try:
+        notif = Notification(
+            patient_id=patient_id,
+            type=notif_type,
+            title=title,
+            message=message,
+            severity=severity,
+            is_read=False,
+            created_at=datetime.utcnow()
+        )
+        session.add(notif)
+        session.commit()
+        session.refresh(notif)
+        return notif
+    except Exception as e:
+        print(f"[Notification] Failed to create notification: {e}")
+        return None
 
 
 @app.get("/notifications", response_model=List[NotificationItem])
-def get_notifications(current_user: dict = Depends(get_current_user)):
+def get_notifications(current_user: Optional[dict] = Depends(get_optional_current_user)):
     """
-    In-app notification feed for Laxuman's Notifications.jsx page.
+    In-app notification feed for Notifications.jsx and Navbar bell icon.
+    Returns persistent lifecycle events from database for authenticated patient or rich demo set.
     """
-    now_str = datetime.utcnow().strftime("%I:%M %p")
-    return [
-        NotificationItem(
-            id=1,
-            title="Leave Now Advisory Active",
-            message="Smart departure calculation is active. Check 'Arrival Prediction' for real-time leave alerts.",
-            timestamp=f"Today, {now_str}",
-            read=False,
-            type="alert",
-        ),
-        NotificationItem(
-            id=2,
-            title="Appointment Confirmed",
-            message="Your OPD token has been issued and queued with your doctor.",
-            timestamp="15 mins ago",
-            read=True,
-            type="info",
-        ),
-    ]
+    patient_id = None
+    if current_user and "sub" in current_user:
+        try:
+            patient_id = int(current_user["sub"])
+        except (ValueError, TypeError):
+            patient_id = None
+
+    with Session(engine) as session:
+        query = select(Notification)
+        if patient_id:
+            query = query.where(
+                (Notification.patient_id == patient_id) | (Notification.patient_id == None)
+            )
+        
+        db_notifs = session.exec(query.order_by(Notification.created_at.desc()).limit(20)).all()
+
+        if db_notifs:
+            items = []
+            for n in db_notifs:
+                diff_sec = (datetime.utcnow() - n.created_at).total_seconds()
+                if diff_sec < 60:
+                    time_str = "Just now"
+                elif diff_sec < 3600:
+                    time_str = f"{int(diff_sec // 60)} mins ago"
+                elif diff_sec < 86400:
+                    time_str = f"{int(diff_sec // 3600)} hours ago"
+                else:
+                    time_str = n.created_at.strftime("%b %d, %I:%M %p")
+
+                items.append(
+                    NotificationItem(
+                        id=n.id,
+                        title=n.title,
+                        message=n.message,
+                        timestamp=time_str,
+                        read=n.is_read,
+                        type=n.type,
+                        severity=n.severity,
+                        priority="high" if n.severity == "critical" else ("warning" if n.severity == "warning" else "info")
+                    )
+                )
+            return items
+
+        # Fallback rich lifecycle demo notifications if DB has no entries for patient yet
+        return [
+            NotificationItem(
+                id=101,
+                title="🚨 Leave Now Advisory Active",
+                message="Smart departure calculation is active. Check 'Arrival Prediction' for real-time traffic & departure alerts.",
+                timestamp="2 mins ago",
+                read=False,
+                type="leave_now",
+                severity="info",
+                priority="high"
+            ),
+            NotificationItem(
+                id=102,
+                title="🔔 You're Next in Line!",
+                message="You are 1st in line. Please proceed to OPD Room 204.",
+                timestamp="10 mins ago",
+                read=False,
+                type="next_in_line",
+                severity="info",
+                priority="high"
+            ),
+            NotificationItem(
+                id=103,
+                title="✅ Appointment Confirmed",
+                message="Appointment Confirmed with Dr. Rajeswari R. Token #18 generated.",
+                timestamp="45 mins ago",
+                read=True,
+                type="booking_confirmed",
+                severity="success",
+                priority="info"
+            ),
+            NotificationItem(
+                id=104,
+                title="⚠️ Emergency Priority Inserted",
+                message="A critical trauma case was admitted into General Medicine OPD. Waiting time adjusted +4 mins.",
+                timestamp="1 hour ago",
+                read=True,
+                type="emergency",
+                severity="warning",
+                priority="warning"
+            )
+        ]
 
 
 @app.put("/notifications/{notification_id}/read")
 def mark_notification_read(notification_id: int):
-    """Marks an in-app notification as read."""
+    """Marks an in-app notification as read in database."""
+    with Session(engine) as session:
+        notif = session.get(Notification, notification_id)
+        if notif:
+            notif.is_read = True
+            session.add(notif)
+            session.commit()
     return {"success": True, "id": notification_id}
+
+
+@app.post("/notifications/mark-all-read")
+def mark_all_notifications_read(current_user: Optional[dict] = Depends(get_optional_current_user)):
+    """Marks all notifications as read for current patient."""
+    patient_id = None
+    if current_user and "sub" in current_user:
+        try:
+            patient_id = int(current_user["sub"])
+        except (ValueError, TypeError):
+            patient_id = None
+
+    with Session(engine) as session:
+        query = select(Notification).where(Notification.is_read == False)
+        if patient_id:
+            query = query.where(Notification.patient_id == patient_id)
+        unread_notifs = session.exec(query).all()
+        for n in unread_notifs:
+            n.is_read = True
+            session.add(n)
+        session.commit()
+    return {"success": True, "message": "All notifications marked as read"}
 
 
 @app.post("/notifications/dispatch-preview", response_model=DispatchNotificationResponse)
@@ -1007,8 +2089,8 @@ def generate_dispatch_preview(
         doctor = session.get(Doctor, appt.doctor_id)
         dept = session.get(Department, doctor.department_id) if doctor else None
 
-        pat_name = req.patient_name or (patient.name if patient else "Patient")
-        pat_phone = req.phone or (patient.phone if patient else "9876543210")
+        pat_name = req.patient_name or appt.beneficiary_name or (patient.name if patient else "Patient")
+        pat_phone = req.phone or appt.contact_phone or (patient.phone if patient else "9876543210")
         doc_name = doctor.name if doctor else "Dr. Rajeswari R."
         dept_name = dept.name if dept else "General Medicine"
         meta = DOCTOR_METADATA.get(doc_name, {})
@@ -1209,38 +2291,44 @@ def calculate_predicted_wait(doctor, department_name: str, queue_pos: int, patie
 @app.get("/staff/queue", response_model=List[StaffQueueItem])
 def get_staff_queue():
     """
-    Returns live OPD queue for staff dashboard, including patient details,
-    triage status, current queue position, predicted wait time, and assigned doctor.
+    Returns live OPD queue for staff dashboard sorted chronologically by
+    triage priority, appointment date, and scheduled slot time.
     """
     with Session(engine) as session:
-        appointments = session.exec(
-            select(Appointment)
-            .where(Appointment.status.in_(["pending", "serving"]))
-            .order_by(Appointment.queue_position.asc(), Appointment.booked_time.asc())
-        ).all()
-
         doctors = {d.id: d for d in session.exec(select(Doctor)).all()}
         departments = {dept.id: dept for dept in session.exec(select(Department)).all()}
         patients = {p.id: p for p in session.exec(select(Patient)).all()}
 
+        all_active_appts = get_sorted_doctor_appointments(session)
+
+        # Track per-doctor position index
+        doctor_pos_tracker = {}
         queue_items = []
-        for appt in appointments:
+        for appt in all_active_appts:
+            doc_id = appt.doctor_id
+            doctor_pos_tracker[doc_id] = doctor_pos_tracker.get(doc_id, 0) + 1
+            pos = 0 if appt.status == "serving" else doctor_pos_tracker[doc_id]
+
             pat = patients.get(appt.patient_id)
             doc = doctors.get(appt.doctor_id)
             dept_name = departments.get(doc.department_id).name if (doc and doc.department_id in departments) else "General Medicine"
             doc_name = doc.name if doc else "Unassigned"
 
-            patient_name = pat.name if pat else f"Patient #{appt.patient_id}"
+            primary_patient_name = pat.name if pat else f"Patient #{appt.patient_id}"
+            is_dep = bool(appt.is_dependent)
+            attendee_name = appt.beneficiary_name or primary_patient_name
+            attendee_age = appt.beneficiary_age or 35
+            attendee_gender = appt.beneficiary_gender or "Male"
+            contact_phone = appt.contact_phone or (pat.phone if pat else "9876543210")
 
-            is_emergency = "Emergency" in patient_name
+            is_emergency = "Emergency" in attendee_name or "Critical" in attendee_name
             if is_emergency:
                 triage = "Critical"
-            elif (appt.queue_position or 99) <= 2:
+            elif pos <= 2 and appt.status != "serving":
                 triage = "Urgent"
             else:
                 triage = "Standard"
 
-            pos = appt.queue_position or 1
             if appt.status == "serving":
                 wait_str = "Serving Now"
             else:
@@ -1249,29 +2337,37 @@ def get_staff_queue():
 
             token_num = f"EMG-{appt.id:02d}" if is_emergency else f"OPD-{appt.id:03d}"
             booked_str = appt.booked_time.strftime("%I:%M %p") if appt.booked_time else "Now"
-
-
+            slot_str = appt.time_slot or "09:30 AM"
 
             queue_items.append(
                 StaffQueueItem(
                     id=appt.id,
                     patient_id=appt.patient_id,
-                    name=patient_name,
-                    age=35,
-                    gender="Male",
+                    name=attendee_name,
+                    age=attendee_age,
+                    gender=attendee_gender,
+                    patient_name=attendee_name,
+                    patient_age=attendee_age,
+                    patient_gender=attendee_gender,
+                    contact_phone=contact_phone,
+                    is_dependent=is_dep,
+                    primary_patient_name=primary_patient_name if is_dep else None,
                     triage=triage,
                     tokenNumber=token_num,
-                    queue_position=pos,
+                    queue_position=pos if appt.status != "serving" else 1,
                     doctor_id=appt.doctor_id,
                     doctor=doc_name,
                     department=dept_name,
                     waitTime=wait_str,
                     status=appt.status,
                     booked_time=booked_str,
+                    time_slot=slot_str,
+                    appointment_date=appt.appointment_date,
                 )
             )
 
         return queue_items
+
 
 
 @app.post("/staff/emergency-insert", response_model=EmergencyInsertResponse)
@@ -1330,12 +2426,18 @@ def insert_emergency_patient(req: EmergencyInsertRequest):
         )
 
         # 3. Create Emergency Appointment at Position 1
+        today_ist = datetime.now(IST).strftime("%Y-%m-%d")
         emergency_appt = Appointment(
             patient_id=emergency_patient.id,
             doctor_id=doctor.id,
             booked_time=datetime.utcnow(),
             status="pending",
             queue_position=1,
+            beneficiary_name=patient_name,
+            appointment_date=today_ist,
+            time_slot="00:00 AM - Emergency Triage",
+            contact_phone=f"EMG-{timestamp_id}",
+            is_dependent=False,
         )
         session.add(emergency_appt)
         session.commit()
@@ -1354,7 +2456,7 @@ def insert_emergency_patient(req: EmergencyInsertRequest):
 
 
 @app.post("/staff/queue/call-next")
-def call_next_patient(doctor_id: Optional[int] = None):
+def call_next_patient(doctor_id: Optional[int] = None, appointment_date: Optional[str] = None):
     """
     Advances the queue for a doctor:
     Marks current 'serving' as 'completed', and sets next 'pending' appointment to 'serving'.
@@ -1363,6 +2465,8 @@ def call_next_patient(doctor_id: Optional[int] = None):
         query = select(Appointment)
         if doctor_id:
             query = query.where(Appointment.doctor_id == doctor_id)
+        if appointment_date:
+            query = query.where(Appointment.appointment_date == appointment_date)
 
         # Find current serving appointment and mark as completed
         current_serving = session.exec(
@@ -1373,6 +2477,19 @@ def call_next_patient(doctor_id: Optional[int] = None):
             current_serving.status = "completed"
             current_serving.queue_position = None
             session.add(current_serving)
+
+            # Stage 3 Lifecycle Trigger: Consultation Completed Notification
+            if current_serving.patient_id:
+                doc = session.get(Doctor, current_serving.doctor_id)
+                doc_name = doc.name if doc else "Doctor"
+                create_patient_notification(
+                    session=session,
+                    patient_id=current_serving.patient_id,
+                    notif_type="consultation_completed",
+                    title="🩺 Consultation Completed",
+                    message=f"Consultation completed with {doc_name}. Your visit summary is available.",
+                    severity="success"
+                )
 
             # Phase 7: Record QueueLog row for completed consultation
             now = datetime.utcnow()
@@ -1393,10 +2510,9 @@ def call_next_patient(doctor_id: Optional[int] = None):
             )
             session.add(log_entry)
 
-        # Find next pending appointment
-        next_pending = session.exec(
-            query.where(Appointment.status == "pending").order_by(Appointment.queue_position.asc())
-        ).first()
+        # Find next pending appointment from the slot-sorted clinical queue
+        active_queue = get_sorted_doctor_appointments(session, doctor_id=doctor_id, appointment_date=appointment_date)
+        next_pending = next((a for a in active_queue if a.status == "pending"), None)
 
         if not next_pending:
             session.commit()
@@ -1405,6 +2521,20 @@ def call_next_patient(doctor_id: Optional[int] = None):
         next_pending.status = "serving"
         next_pending.queue_position = 0
         session.add(next_pending)
+
+        # Stage 2 Lifecycle Trigger: Next in Line Alert
+        if next_pending.patient_id:
+            doc = session.get(Doctor, next_pending.doctor_id)
+            meta = DOCTOR_METADATA.get(doc.name, {}) if doc else {}
+            room = meta.get("room", "Room 204")
+            create_patient_notification(
+                session=session,
+                patient_id=next_pending.patient_id,
+                notif_type="next_in_line",
+                title="🔔 You're Next in Line!",
+                message=f"You're next! Please report near {room} with {doc.name if doc else 'Doctor'}.",
+                severity="info"
+            )
 
         # Advance other pending appointments forward via atomic SQL
         session.exec(
@@ -1418,6 +2548,83 @@ def call_next_patient(doctor_id: Optional[int] = None):
         return {
             "message": f"Called next patient (Appt #{next_pending.id})",
             "serving": {"id": next_pending.id, "patient_id": next_pending.patient_id}
+        }
+
+
+@app.post("/staff/queue/mark-absent/{appointment_id}")
+def mark_patient_absent_no_show(appointment_id: int):
+    """
+    Stage 4 Lifecycle Trigger:
+    When a patient's turn is called but they are absent, hospital staff marks them absent.
+    Dispatches a critical red urgency in-app notification and SMS warning.
+    """
+    with Session(engine) as session:
+        appt = session.get(Appointment, appointment_id)
+        if not appt:
+            raise HTTPException(status_code=404, detail="Appointment not found")
+
+        doctor = session.get(Doctor, appt.doctor_id)
+        meta = DOCTOR_METADATA.get(doctor.name, {}) if doctor else {}
+        room = meta.get("room", "Room 204")
+
+        # Create Stage 4 Critical Notification
+        notif = create_patient_notification(
+            session=session,
+            patient_id=appt.patient_id,
+            notif_type="no_show_warning",
+            title="🚨 Urgent: Turn Called - Immediate Action Required",
+            message=f"Urgent: Your turn has arrived! Report to Room {room} within 5 minutes or your slot will be released.",
+            severity="critical"
+        )
+
+        patient = session.get(Patient, appt.patient_id) if appt.patient_id else None
+        if patient and patient.phone:
+            send_automated_sms(
+                patient.phone,
+                f"[Shridevi Hospital] URGENT: Your turn has arrived in {room}! Report within 5 mins or slot will be released."
+            )
+
+        return {
+            "success": True,
+            "message": f"No-show warning alert dispatched for Appointment #{appointment_id}",
+            "notification": notif
+        }
+
+
+@app.post("/queue/expire-daily-slots")
+def expire_daily_slots(doctor_id: Optional[int] = None):
+    """
+    Stage 5 Lifecycle Trigger:
+    Any appointment left in 'pending' status at end of operational day (or 8:00 PM)
+    is marked 'expired' / 'missed' and receives a Stage 5 expiration notification.
+    """
+    with Session(engine) as session:
+        query = select(Appointment).where(Appointment.status == "pending")
+        if doctor_id:
+            query = query.where(Appointment.doctor_id == doctor_id)
+
+        pending_appts = session.exec(query).all()
+        expired_count = len(pending_appts)
+
+        for appt in pending_appts:
+            appt.status = "expired"
+            session.add(appt)
+
+            if appt.patient_id:
+                create_patient_notification(
+                    session=session,
+                    patient_id=appt.patient_id,
+                    notif_type="slot_expired",
+                    title="⚠️ Slot Expired",
+                    message="Slot Expired: You did not attend your booked appointment today.",
+                    severity="warning"
+                )
+
+        session.commit()
+        return {
+            "success": True,
+            "message": f"Successfully expired {expired_count} unattended appointments.",
+            "expired_count": expired_count
         }
 
 
@@ -1759,4 +2966,212 @@ def staff_symptom_analyze(req: SymptomAnalyzeRequest):
         ))
 
     return SymptomAnalyzeResponse(results=results)
+
+
+# ---------------------------------------------------------------------
+# PHASE 8: OFFLINE WALK-IN REGISTRATION & DOCTOR ROOM CONSULTATION
+# ---------------------------------------------------------------------
+
+@app.post("/staff/walkin-register", response_model=StaffWalkInRegisterResponse)
+def register_walkin_patient(req: StaffWalkInRegisterRequest):
+    """
+    Offline Reception Counter Walk-in Registration:
+    Enables hospital receptionists to register walk-in patients in 10 seconds.
+    Integrates directly with Neon PostgreSQL queue with chronological slot ordering,
+    immediate token allocation, and printable receipt data.
+    """
+    now_ist = datetime.now(IST)
+    today_ist = now_ist.strftime("%Y-%m-%d")
+    clean_phone = re.sub(r"\D", "", str(req.phone or "9876543210"))
+    if len(clean_phone) > 10 and clean_phone.startswith("91"):
+        clean_phone = clean_phone[2:]
+    if len(clean_phone) < 10:
+        clean_phone = "9876543210"
+
+    # Default to current hour/nearest slot if not supplied
+    if not req.time_slot:
+        curr_hour = now_ist.hour
+        curr_min = now_ist.minute
+        if curr_min > 30:
+            target_hour = (curr_hour + 1) if curr_hour < 20 else 20
+            period = "PM" if target_hour >= 12 else "AM"
+            display_hour = target_hour if target_hour <= 12 else target_hour - 12
+            chosen_slot = f"{display_hour:02d}:00 {period}"
+        else:
+            period = "PM" if curr_hour >= 12 else "AM"
+            display_hour = curr_hour if curr_hour <= 12 else curr_hour - 12
+            chosen_slot = f"{display_hour:02d}:30 {period}"
+    else:
+        chosen_slot = req.time_slot
+
+    with Session(engine) as session:
+        # 1. Find or create patient
+        patient = session.exec(select(Patient).where(Patient.phone == clean_phone)).first()
+        if not patient:
+            clean_email = f"walkin.{clean_phone[-4:]}.{uuid.uuid4().hex[:4]}@mediflow.local"
+            patient = Patient(
+                name=req.patient_name.strip() or "Walk-in Patient",
+                phone=clean_phone,
+                email=clean_email,
+                password_hash=hash_password("Walkin@123"),
+            )
+            session.add(patient)
+            session.commit()
+            session.refresh(patient)
+
+        # 2. Resolve Doctor
+        doctor = None
+        if req.doctor_id and req.doctor_id > 0:
+            doctor = session.get(Doctor, req.doctor_id)
+        if not doctor and req.doctor_name:
+            doctor = session.exec(select(Doctor).where(Doctor.name == req.doctor_name)).first()
+        if not doctor and req.department:
+            dept = session.exec(select(Department).where(Department.name == req.department)).first()
+            if dept:
+                doctor = session.exec(select(Doctor).where(Doctor.department_id == dept.id)).first()
+        if not doctor:
+            doctor = session.exec(select(Doctor)).first()
+
+        doc_id = doctor.id if doctor else 1
+        dept = session.get(Department, doctor.department_id) if doctor else None
+        dept_name = dept.name if dept else "General Medicine"
+        meta = DOCTOR_METADATA.get(doctor.name, {}) if doctor else {}
+
+        # 3. Create Appointment
+        appointment = Appointment(
+            patient_id=patient.id,
+            doctor_id=doc_id,
+            booked_time=now_ist.replace(tzinfo=None),
+            status="pending",
+            queue_position=1,
+            time_slot=chosen_slot,
+            appointment_date=today_ist,
+            beneficiary_name=req.patient_name.strip() or patient.name,
+            beneficiary_age=req.age or 35,
+            beneficiary_gender=req.gender or "Male",
+            contact_phone=clean_phone,
+            is_dependent=False,
+        )
+        session.add(appointment)
+        session.commit()
+        session.refresh(appointment)
+
+        # 4. Strict accurate chronological slot queue calculation
+        active_queue = get_sorted_doctor_appointments(session, doctor_id=doc_id, appointment_date=today_ist)
+        try:
+            target_idx = next(i for i, a in enumerate(active_queue) if a.id == appointment.id)
+            patients_ahead = sum(1 for a in active_queue[:target_idx] if a.status == "pending")
+            calculated_pos = target_idx + 1
+        except StopIteration:
+            patients_ahead = 0
+            calculated_pos = 1
+
+        appointment.queue_position = calculated_pos
+        session.add(appointment)
+        session.commit()
+
+        # 5. Create Walk-in Notification
+        create_patient_notification(
+            session=session,
+            patient_id=patient.id,
+            notif_type="booking_confirmed",
+            title="🎟️ Walk-in OPD Pass Issued",
+            message=f"Walk-in Token OPD-{appointment.id:03d} issued for {req.patient_name} ({doctor.name} • {meta.get('room', 'Room 204')}).",
+            severity="success"
+        )
+
+        avg_consult = doctor.avg_consult_minutes or 10
+        delay_buf = doctor_delays.get(doctor.id, {}).get("delay_minutes", 0)
+        est_wait = round(patients_ahead * avg_consult * 0.9 + delay_buf, 1)
+
+        return StaffWalkInRegisterResponse(
+            success=True,
+            message="Walk-in patient registered and OPD token slip issued!",
+            appointment_id=appointment.id,
+            tokenNumber=f"OPD-{appointment.id:03d}",
+            numericToken=appointment.id,
+            patient_name=req.patient_name.strip(),
+            age=req.age or 35,
+            gender=req.gender or "Male",
+            phone=clean_phone,
+            doctor=doctor.name,
+            department=dept_name,
+            roomNo=meta.get("room", "Room 204"),
+            time_slot=chosen_slot,
+            appointment_date=today_ist,
+            queue_position=calculated_pos,
+            patientsAhead=patients_ahead,
+            estimatedWaitMinutes=est_wait,
+            booked_time=now_ist.strftime("%I:%M %p"),
+        )
+
+
+@app.get("/staff/doctor/{doctor_id}/consultation")
+def get_doctor_room_consultation(doctor_id: int):
+    """
+    Dedicated Doctor Consultation Room telemetry endpoint:
+    Returns the current in-consultation patient, room status, delay buffer,
+    and the next 5 upcoming patients in line for this specific room.
+    """
+    with Session(engine) as session:
+        auto_expire_past_appointments(session)
+        doctor = session.get(Doctor, doctor_id)
+        if not doctor:
+            raise HTTPException(status_code=404, detail="Doctor not found")
+
+        dept = session.get(Department, doctor.department_id) if doctor.department_id else None
+        dept_name = dept.name if dept else "General Medicine"
+        meta = DOCTOR_METADATA.get(doctor.name, {})
+
+        now_ist = datetime.now(IST)
+        today_ist = now_ist.strftime("%Y-%m-%d")
+
+        active_queue = get_sorted_doctor_appointments(session, doctor_id=doctor.id, appointment_date=today_ist)
+        patients = {p.id: p for p in session.exec(select(Patient)).all()}
+
+        current_serving = next((a for a in active_queue if a.status == "serving"), None)
+        pending_list = [a for a in active_queue if a.status == "pending"]
+
+        serving_patient_data = None
+        if current_serving:
+            pat = patients.get(current_serving.patient_id)
+            serving_patient_data = {
+                "appointment_id": current_serving.id,
+                "tokenNumber": f"OPD-{current_serving.id:03d}",
+                "name": current_serving.beneficiary_name or (pat.name if pat else "Patient"),
+                "age": current_serving.beneficiary_age or (pat.age if pat else 35),
+                "gender": current_serving.beneficiary_gender or "Male",
+                "phone": current_serving.contact_phone or (pat.phone if pat else "9876543210"),
+                "time_slot": current_serving.time_slot,
+                "status": "Serving Now",
+                "is_emergency": current_serving.queue_position == 1 and current_serving.is_dependent == False
+            }
+
+        upcoming_patients = []
+        for a in pending_list[:5]:
+            pat = patients.get(a.patient_id)
+            upcoming_patients.append({
+                "appointment_id": a.id,
+                "tokenNumber": f"OPD-{a.id:03d}",
+                "name": a.beneficiary_name or (pat.name if pat else "Patient"),
+                "age": a.beneficiary_age or 35,
+                "gender": a.beneficiary_gender or "Male",
+                "time_slot": a.time_slot,
+                "queue_position": a.queue_position
+            })
+
+        doc_delay = doctor_delays.get(doctor.id, {"status": "Active", "delay_minutes": 0})
+
+        return {
+            "doctor_id": doctor.id,
+            "doctor_name": doctor.name,
+            "department": dept_name,
+            "roomNo": meta.get("room", "Room 204"),
+            "status": doc_delay.get("status", "Active"),
+            "delay_minutes": doc_delay.get("delay_minutes", 0),
+            "total_waiting": len(pending_list),
+            "current_patient": serving_patient_data,
+            "upcoming_patients": upcoming_patients
+        }
+
 

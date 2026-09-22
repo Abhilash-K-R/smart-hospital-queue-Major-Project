@@ -24,7 +24,12 @@ export const useNotification = () => {
     notificationService.markAsRead(id);
   };
 
+  const markAllRead = () => {
+    setNotifications(prev => prev.map(n => ({ ...n, read: true })));
+    notificationService.markAllRead();
+  };
+
   const unreadCount = notifications.filter(n => !n.read).length;
 
-  return { notifications, unreadCount, markAsRead, loading };
+  return { notifications, unreadCount, markAsRead, markAllRead, loading };
 };

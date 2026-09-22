@@ -3,6 +3,7 @@ import Login from './pages/Login';
 import Dashboard from './pages/Dashboard';
 import Queue from './pages/Queue';
 import Emergency from './pages/Emergency';
+import DoctorRoom from './pages/DoctorRoom';
 import SymptomMapping from './pages/SymptomMapping';
 import Layout from './components/Layout';
 import ProtectedRoute from './components/ProtectedRoute';
@@ -24,6 +25,7 @@ function App() {
         <Route index element={<Navigate to="/dashboard" replace />} />
         <Route path="dashboard" element={<Dashboard />} />
         <Route path="queue" element={<Queue />} />
+        <Route path="doctor-room" element={<DoctorRoom />} />
         <Route path="emergency" element={<Emergency />} />
         <Route path="mapping" element={<SymptomMapping />} />
       </Route>
