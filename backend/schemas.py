@@ -403,6 +403,7 @@ class EmergencyInsertRequest(BaseModel):
     gender: str | None = "Male"
     chief_complaint: str
     doctor_id: int | None = None
+    contact_phone: str | None = None
     blood_pressure: str | None = "120/80"
     heart_rate: int | None = 85
     spo2: int | None = 98
