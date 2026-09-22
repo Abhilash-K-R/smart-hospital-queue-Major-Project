@@ -2266,26 +2266,45 @@ def staff_login(req: StaffLoginRequest):
     )
 
 
+def format_booked_time_ist(dt: Optional[datetime]) -> str:
+    """Converts a database datetime to Indian Standard Time (IST) formatted string."""
+    if not dt:
+        return "Now"
+    try:
+        if dt.tzinfo is None:
+            # Stored as UTC in database without timezone offset
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt.astimezone(IST).strftime("%I:%M %p")
+    except Exception:
+        return dt.strftime("%I:%M %p")
+
+
 def calculate_predicted_wait(doctor, department_name: str, queue_pos: int, patient_type: str = "normal") -> float:
     """
     Two-Tier Wait Time Computation for Staff Live Queue & Logs:
-      - Tier 1: Random Forest ML Baseline Prediction
+      - Tier 1: Random Forest ML Baseline Prediction (with monotonic emergency queue scaling)
       - Tier 2: Real-Time Operational Delay Overlay
     """
     try:
-        now = datetime.utcnow()
+        now_ist = datetime.now(IST)
         doc_code = f"DOC{doctor.id}" if doctor else "DOC1"
         avg_mins = doctor.avg_consult_minutes if doctor else 15
-        ml_pred = predict_wait(
-            doctor_id=doc_code,
-            department=department_name or "General Medicine",
-            doctor_avg_consult_minutes=avg_mins,
-            day_of_week=now.strftime("%A"),
-            hour_of_day=now.hour,
-            queue_length_ahead=max(0, queue_pos - 1),
-            patient_type=patient_type,
-        )
-        base_wait = float(ml_pred["predicted_minutes"])
+
+        if patient_type == "emergency":
+            # For emergency triage: Position 1 is immediate stabilization (~4-5 mins)
+            # Subsequent emergency cases queued for the same doctor accumulate consultation intervals
+            base_wait = 4.0 + max(0, queue_pos - 1) * float(avg_mins)
+        else:
+            ml_pred = predict_wait(
+                doctor_id=doc_code,
+                department=department_name or "General Medicine",
+                doctor_avg_consult_minutes=avg_mins,
+                day_of_week=now_ist.strftime("%A"),
+                hour_of_day=now_ist.hour,
+                queue_length_ahead=max(0, queue_pos - 1),
+                patient_type=patient_type,
+            )
+            base_wait = float(ml_pred["predicted_minutes"])
     except Exception:
         avg_mins = doctor.avg_consult_minutes if doctor else 15
         base_wait = float(max(1, queue_pos) * avg_mins)
@@ -2341,7 +2360,7 @@ def get_staff_queue():
                 wait_str = f"{int(pred_wait)}m"
 
             token_num = f"EMG-{appt.id:02d}" if is_emergency else f"OPD-{appt.id:03d}"
-            booked_str = appt.booked_time.strftime("%I:%M %p") if appt.booked_time else "Now"
+            booked_str = format_booked_time_ist(appt.booked_time)
             slot_str = appt.time_slot or "09:30 AM"
 
             queue_items.append(
