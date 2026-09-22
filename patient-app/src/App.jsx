@@ -57,6 +57,8 @@ const Layout = ({ children }) => {
   );
 };
 
+import { ProtectedRoute } from './components/ProtectedRoute';
+
 // Composes providers and the client-side route table for the patient portal.
 export function App() {
   return (
@@ -66,19 +68,72 @@ export function App() {
           <Router>
             <Layout>
               <Routes>
+                {/* Public Routes */}
                 <Route path="/" element={<Home />} />
                 <Route path="/login" element={<Login />} />
                 <Route path="/register" element={<Register />} />
                 <Route path="/forgot-password" element={<ForgotPassword />} />
-                <Route path="/dashboard" element={<Dashboard />} />
-                <Route path="/queue-status" element={<QueueStatus />} />
-                <Route path="/arrival-prediction" element={<ArrivalPrediction />} />
-                <Route path="/notifications" element={<Notifications />} />
-                <Route path="/profile" element={<Profile />} />
-                <Route path="/appointment" element={<Appointment />} />
-                <Route path="/book-appointment" element={<Appointment />} />
                 <Route path="/faq" element={<FAQ />} />
                 <Route path="/contact" element={<Contact />} />
+
+                {/* Protected Patient Routes (Require Login) */}
+                <Route
+                  path="/dashboard"
+                  element={
+                    <ProtectedRoute>
+                      <Dashboard />
+                    </ProtectedRoute>
+                  }
+                />
+                <Route
+                  path="/queue-status"
+                  element={
+                    <ProtectedRoute>
+                      <QueueStatus />
+                    </ProtectedRoute>
+                  }
+                />
+                <Route
+                  path="/arrival-prediction"
+                  element={
+                    <ProtectedRoute>
+                      <ArrivalPrediction />
+                    </ProtectedRoute>
+                  }
+                />
+                <Route
+                  path="/appointment"
+                  element={
+                    <ProtectedRoute>
+                      <Appointment />
+                    </ProtectedRoute>
+                  }
+                />
+                <Route
+                  path="/book-appointment"
+                  element={
+                    <ProtectedRoute>
+                      <Appointment />
+                    </ProtectedRoute>
+                  }
+                />
+                <Route
+                  path="/notifications"
+                  element={
+                    <ProtectedRoute>
+                      <Notifications />
+                    </ProtectedRoute>
+                  }
+                />
+                <Route
+                  path="/profile"
+                  element={
+                    <ProtectedRoute>
+                      <Profile />
+                    </ProtectedRoute>
+                  }
+                />
+
                 <Route path="*" element={<NotFound />} />
               </Routes>
             </Layout>

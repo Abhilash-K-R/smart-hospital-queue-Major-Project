@@ -409,7 +409,8 @@ export const ArrivalPrediction = () => {
     return new Date().toLocaleDateString('en-US', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' });
   };
 
-  const activeTokenNumber = user?.tokenNumber || queueState.tokenNumber || (user?.appointment_id ? `OPD-${String(user.appointment_id).padStart(3, '0')}` : DEMO_PATIENT.tokenNumber);
+  const activeTokenNumber = user?.tokenNumber || queueState.tokenNumber || (user?.appointment_id ? `OPD-${String(user.appointment_id).padStart(3, '0')}` : null);
+  const hasActiveAppointment = Boolean(activeTokenNumber || queueState.hasActiveToken || user?.appointment_id);
   const activeApptId = user?.appointment_id || user?.appointmentId || user?.id || 1;
 
   // Handle appointment cancellation
@@ -473,29 +474,17 @@ export const ArrivalPrediction = () => {
     });
   };
 
-  // Prepare and open Dual WhatsApp & SMS Dispatch Modal
-  const handleOpenDispatchSimulator = async () => {
+  // Dual Dispatch Modal Trigger
+  const handleOpenDispatchModal = async () => {
     setIsDispatchLoading(true);
     try {
-      const travelMins = departureData?.travel_time_minutes ?? queueState.trafficDurationMinutes ?? 15;
-      const waitMins = departureData?.predicted_wait_minutes ?? queueState.estimatedWaitMinutes ?? 35;
-      
-      const payload = {
-        patient_name: user?.name || DEMO_PATIENT.name,
-        phone: user?.phone || DEMO_PATIENT.phone || "9876543210",
-        token_number: user?.tokenNumber || queueState.tokenNumber || "OPD-011",
-        doctor_name: user?.doctor || queueState.doctorName || "Dr. Rajeswari R.",
-        room_number: user?.roomNo || "Room 204",
-        travel_time_minutes: travelMins,
-        buffer_minutes: 15,
-        total_travel_needed_minutes: travelMins + 15,
-        estimated_wait_minutes: waitMins,
-        should_leave_now: Boolean(shouldLeaveNow),
-        origin_address: locationState?.name || "Tumakuru City",
-        live_tracking_url: `${window.location.origin}/queue-status`
-      };
-
-      const res = await notificationService.getDispatchPreview(payload);
+      const res = await notificationService.getDispatchPreview({
+        appointment_id: activeApptId,
+        patient_name: user?.name || "Patient",
+        phone: user?.phone || "9876543210",
+        patient_lat: coords?.lat,
+        patient_lng: coords?.lng
+      });
       setDispatchData(res);
       setIsDispatchModalOpen(true);
     } catch (err) {
@@ -512,138 +501,159 @@ export const ArrivalPrediction = () => {
         subtitle="Real-time appointment details, OPD queue wait, distance & intelligent route navigation"
       />
 
-      {/* Booked Appointment Overview Card */}
-      <div className={`glass-card rounded-3xl p-6 sm:p-8 space-y-6 border transition-all ${
-        isCancelled
-          ? 'border-rose-300 dark:border-rose-900/60 bg-gradient-to-br from-white via-rose-50/20 to-rose-100/30 dark:from-slate-900 dark:via-rose-950/20 dark:to-slate-900'
-          : isExpired
-          ? 'border-amber-300 dark:border-amber-900/60 bg-gradient-to-br from-white via-amber-50/20 to-amber-100/30 dark:from-slate-900 dark:via-amber-950/20 dark:to-slate-900'
-          : 'border-slate-200 dark:border-slate-800 bg-gradient-to-br from-white via-slate-50 to-blue-50/40 dark:from-slate-900 dark:via-slate-900 dark:to-blue-950/30'
-      }`}>
-        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 border-b border-slate-200 dark:border-slate-800 pb-4">
-          <div className="flex items-center gap-3.5">
-            <div className={`w-12 h-12 rounded-2xl text-white flex items-center justify-center font-black text-lg shadow-lg ${
-              isCancelled
-                ? 'bg-rose-600 shadow-rose-500/25'
-                : isExpired
-                ? 'bg-amber-600 shadow-amber-500/25'
-                : 'bg-blue-600 shadow-blue-500/25'
-            }`}>
-              {isCancelled ? <CalendarX className="w-6 h-6" /> : isExpired ? <Clock className="w-6 h-6" /> : <Ticket className="w-6 h-6" />}
-            </div>
-            <div>
-              <div className="flex items-center gap-2">
-                <span className={`text-[10px] font-black uppercase tracking-widest px-2.5 py-0.5 rounded-full ${
-                  isCancelled
-                    ? 'bg-rose-100 dark:bg-rose-900/60 text-rose-800 dark:text-rose-200'
-                    : isExpired
-                    ? 'bg-amber-100 dark:bg-amber-900/60 text-amber-800 dark:text-amber-200'
-                    : 'bg-blue-100 dark:bg-blue-900/60 text-blue-800 dark:text-blue-200'
-                }`}>
-                  {isCancelled ? 'Cancelled Slot' : isExpired ? 'Slot Expired (OPD Closed)' : 'Active Consultation Slot'}
-                </span>
-                <span className="text-xs text-slate-400 font-semibold">
-                  • {isCancelled ? 'Token Released' : isExpired ? 'Consultation Concluded (8:00 PM)' : 'Token Assigned'}
-                </span>
-              </div>
-              <h2 className={`text-xl font-black mt-0.5 ${
-                isCancelled ? 'text-slate-500 line-through dark:text-slate-400' : 'text-slate-900 dark:text-white'
+      {/* Booked Appointment Overview Card OR Empty State */}
+      {!hasActiveAppointment ? (
+        <div className="glass-card rounded-3xl p-10 text-center space-y-4 border border-slate-200 dark:border-slate-800 bg-white/60 dark:bg-slate-900/60 shadow-sm">
+          <div className="w-16 h-16 mx-auto rounded-2xl bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 flex items-center justify-center shadow-md shadow-blue-500/10">
+            <Ticket className="w-8 h-8" />
+          </div>
+          <div className="space-y-1">
+            <h3 className="text-lg font-bold text-slate-900 dark:text-white">No Active Appointment Found</h3>
+            <p className="text-xs text-slate-500 dark:text-slate-400 max-w-md mx-auto">
+              You currently do not have an active OPD appointment. Book a specialist consultation to track your live queue position and AI departure time.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => navigate('/appointment')}
+            className="inline-flex items-center gap-2 px-6 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs rounded-xl shadow-md shadow-blue-500/25 transition cursor-pointer"
+          >
+            <PlusCircle className="w-4 h-4" /> Book OPD Appointment Now
+          </button>
+        </div>
+      ) : (
+        <div className={`glass-card rounded-3xl p-6 sm:p-8 space-y-6 border transition-all ${
+          isCancelled
+            ? 'border-rose-300 dark:border-rose-900/60 bg-gradient-to-br from-white via-rose-50/20 to-rose-100/30 dark:from-slate-900 dark:via-rose-950/20 dark:to-slate-900'
+            : isExpired
+            ? 'border-amber-300 dark:border-amber-900/60 bg-gradient-to-br from-white via-amber-50/20 to-amber-100/30 dark:from-slate-900 dark:via-amber-950/20 dark:to-slate-900'
+            : 'border-slate-200 dark:border-slate-800 bg-gradient-to-br from-white via-slate-50 to-blue-50/40 dark:from-slate-900 dark:via-slate-900 dark:to-blue-950/30'
+        }`}>
+          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 border-b border-slate-200 dark:border-slate-800 pb-4">
+            <div className="flex items-center gap-3.5">
+              <div className={`w-12 h-12 rounded-2xl text-white flex items-center justify-center font-black text-lg shadow-lg ${
+                isCancelled
+                  ? 'bg-rose-600 shadow-rose-500/25'
+                  : isExpired
+                  ? 'bg-amber-600 shadow-amber-500/25'
+                  : 'bg-blue-600 shadow-blue-500/25'
               }`}>
-                Token {activeTokenNumber}
-              </h2>
+                {isCancelled ? <CalendarX className="w-6 h-6" /> : isExpired ? <Clock className="w-6 h-6" /> : <Ticket className="w-6 h-6" />}
+              </div>
+              <div>
+                <div className="flex items-center gap-2">
+                  <span className={`text-[10px] font-black uppercase tracking-widest px-2.5 py-0.5 rounded-full ${
+                    isCancelled
+                      ? 'bg-rose-100 dark:bg-rose-900/60 text-rose-800 dark:text-rose-200'
+                      : isExpired
+                      ? 'bg-amber-100 dark:bg-amber-900/60 text-amber-800 dark:text-amber-200'
+                      : 'bg-blue-100 dark:bg-blue-900/60 text-blue-800 dark:text-blue-200'
+                  }`}>
+                    {isCancelled ? 'Cancelled Slot' : isExpired ? 'Slot Expired (OPD Closed)' : 'Active Consultation Slot'}
+                  </span>
+                  <span className="text-xs text-slate-400 font-semibold">
+                    • {isCancelled ? 'Token Released' : isExpired ? 'Consultation Concluded (8:00 PM)' : 'Token Assigned'}
+                  </span>
+                </div>
+                <h2 className={`text-xl font-black mt-0.5 ${
+                  isCancelled ? 'text-slate-500 line-through dark:text-slate-400' : 'text-slate-900 dark:text-white'
+                }`}>
+                  Token {activeTokenNumber}
+                </h2>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2">
+              {isCancelled ? (
+                <>
+                  <span className="px-3 py-1.5 rounded-xl bg-rose-500/10 text-rose-600 dark:text-rose-400 border border-rose-500/20 text-xs font-bold flex items-center gap-1.5">
+                    <XCircle className="w-4 h-4" /> Cancelled
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => navigate('/appointment')}
+                    className="px-3.5 py-1.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold transition-all flex items-center gap-1.5 shadow-md shadow-blue-500/20 active:scale-95"
+                  >
+                    <PlusCircle className="w-3.5 h-3.5" /> Book New Slot
+                  </button>
+                </>
+              ) : isExpired ? (
+                <>
+                  <span className="px-3 py-1.5 rounded-xl bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20 text-xs font-bold flex items-center gap-1.5">
+                    <Clock className="w-4 h-4" /> OPD Closed
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => navigate('/appointment')}
+                    className="px-3.5 py-1.5 rounded-xl bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold transition-all flex items-center gap-1.5 shadow-md shadow-amber-500/20 active:scale-95"
+                  >
+                    <Calendar className="w-3.5 h-3.5" /> Book Tomorrow
+                  </button>
+                </>
+              ) : (
+                <>
+                  <span className="px-3 py-1.5 rounded-xl bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 text-xs font-bold flex items-center gap-1.5">
+                    <CheckCircle2 className="w-4 h-4" /> Slot Confirmed
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setIsCancelModalOpen(true)}
+                    className="px-3 py-1.5 rounded-xl text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/40 border border-rose-200 dark:border-rose-900/40 text-xs font-bold transition-all flex items-center gap-1.5 shadow-sm hover:border-rose-300 active:scale-95"
+                  >
+                    <XCircle className="w-3.5 h-3.5" /> Cancel Appointment
+                  </button>
+                </>
+              )}
             </div>
           </div>
 
-          <div className="flex items-center gap-2">
-            {isCancelled ? (
-              <>
-                <span className="px-3 py-1.5 rounded-xl bg-rose-500/10 text-rose-600 dark:text-rose-400 border border-rose-500/20 text-xs font-bold flex items-center gap-1.5">
-                  <XCircle className="w-4 h-4" /> Cancelled
-                </span>
-                <button
-                  type="button"
-                  onClick={() => navigate('/appointment')}
-                  className="px-3.5 py-1.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold transition-all flex items-center gap-1.5 shadow-md shadow-blue-500/20 active:scale-95"
-                >
-                  <PlusCircle className="w-3.5 h-3.5" /> Book New Slot
-                </button>
-              </>
-            ) : isExpired ? (
-              <>
-                <span className="px-3 py-1.5 rounded-xl bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20 text-xs font-bold flex items-center gap-1.5">
-                  <Clock className="w-4 h-4" /> OPD Closed
-                </span>
-                <button
-                  type="button"
-                  onClick={() => navigate('/appointment')}
-                  className="px-3.5 py-1.5 rounded-xl bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold transition-all flex items-center gap-1.5 shadow-md shadow-amber-500/20 active:scale-95"
-                >
-                  <Calendar className="w-3.5 h-3.5" /> Book Tomorrow
-                </button>
-              </>
-            ) : (
-              <>
-                <span className="px-3 py-1.5 rounded-xl bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 text-xs font-bold flex items-center gap-1.5">
-                  <CheckCircle2 className="w-4 h-4" /> Slot Confirmed
-                </span>
-                <button
-                  type="button"
-                  onClick={() => setIsCancelModalOpen(true)}
-                  className="px-3 py-1.5 rounded-xl text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/40 border border-rose-200 dark:border-rose-900/40 text-xs font-bold transition-all flex items-center gap-1.5 shadow-sm hover:border-rose-300 active:scale-95"
-                >
-                  <XCircle className="w-3.5 h-3.5" /> Cancel Appointment
-                </button>
-              </>
-            )}
+          {/* 4 Details Grid */}
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 text-xs">
+            <div className="p-3.5 bg-white dark:bg-slate-800/80 rounded-2xl border border-slate-200 dark:border-slate-700/80 space-y-1">
+              <span className="text-slate-400 text-[10px] uppercase font-bold">Attending Specialist</span>
+              <p className="font-bold text-slate-900 dark:text-white truncate">
+                {user?.doctor || queueState.doctor || "Dr. Rajeswari R."}
+              </p>
+              <p className="text-[10px] text-blue-600 dark:text-blue-400 font-medium">
+                {user?.department || queueState.department || "General Medicine"}
+              </p>
+            </div>
+
+            <div className="p-3.5 bg-white dark:bg-slate-800/80 rounded-2xl border border-slate-200 dark:border-slate-700/80 space-y-1">
+              <span className="text-slate-400 text-[10px] uppercase font-bold">Consultation Room</span>
+              <p className="font-bold text-slate-900 dark:text-white truncate">
+                {user?.roomNo || queueState.roomNo || "Room 204"}
+              </p>
+              <p className="text-[10px] text-slate-500">Shridevi Hospital Sira Rd</p>
+            </div>
+
+            <div className="p-3.5 bg-white dark:bg-slate-800/80 rounded-2xl border border-slate-200 dark:border-slate-700/80 space-y-1">
+              <span className="text-slate-400 text-[10px] uppercase font-bold flex items-center gap-1">
+                <Calendar className="w-3 h-3 text-blue-500" /> Date & Time Slot
+              </span>
+              <p className="text-[11px] font-semibold text-blue-600 dark:text-blue-400">
+                {getFormattedDate()}
+              </p>
+              <p className="font-black text-slate-900 dark:text-white text-sm">
+                {user?.time_slot || user?.timeSlot || user?.appointmentTime || queueState?.timeSlot || "09:30 AM"}
+              </p>
+              <p className={`text-[10px] font-medium ${isCancelled ? 'text-rose-500' : isExpired ? 'text-amber-500 font-bold' : 'text-emerald-500'}`}>
+                {isCancelled ? 'Slot Cancelled' : isExpired ? 'Slot Expired (OPD Closed)' : 'Reporting Window Open'}
+              </p>
+            </div>
+
+            <div className="p-3.5 bg-white dark:bg-slate-800/80 rounded-2xl border border-slate-200 dark:border-slate-700/80 space-y-1">
+              <span className="text-slate-400 text-[10px] uppercase font-bold">Patient Name</span>
+              <p className="font-bold text-slate-900 dark:text-white truncate">
+                {user?.name || "Patient"}
+              </p>
+              <p className="text-[10px] text-slate-500">
+                {user?.phone ? (user.phone.startsWith('+91') ? user.phone : `+91 ${user.phone}`) : ""}
+              </p>
+            </div>
           </div>
         </div>
-
-        {/* 4 Details Grid */}
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 text-xs">
-          <div className="p-3.5 bg-white dark:bg-slate-800/80 rounded-2xl border border-slate-200 dark:border-slate-700/80 space-y-1">
-            <span className="text-slate-400 text-[10px] uppercase font-bold">Attending Specialist</span>
-            <p className="font-bold text-slate-900 dark:text-white truncate">
-              {user?.doctor || queueState.doctor || DEMO_PATIENT.doctor}
-            </p>
-            <p className="text-[10px] text-blue-600 dark:text-blue-400 font-medium">
-              {user?.department || queueState.department || DEMO_PATIENT.department}
-            </p>
-          </div>
-
-          <div className="p-3.5 bg-white dark:bg-slate-800/80 rounded-2xl border border-slate-200 dark:border-slate-700/80 space-y-1">
-            <span className="text-slate-400 text-[10px] uppercase font-bold">Consultation Room</span>
-            <p className="font-bold text-slate-900 dark:text-white truncate">
-              {user?.roomNo || queueState.roomNo || DEMO_PATIENT.roomNo}
-            </p>
-            <p className="text-[10px] text-slate-500">Shridevi Hospital Sira Rd</p>
-          </div>
-
-          <div className="p-3.5 bg-white dark:bg-slate-800/80 rounded-2xl border border-slate-200 dark:border-slate-700/80 space-y-1">
-            <span className="text-slate-400 text-[10px] uppercase font-bold flex items-center gap-1">
-              <Calendar className="w-3 h-3 text-blue-500" /> Date & Time Slot
-            </span>
-            <p className="text-[11px] font-semibold text-blue-600 dark:text-blue-400">
-              {getFormattedDate()}
-            </p>
-            <p className="font-black text-slate-900 dark:text-white text-sm">
-              {user?.time_slot || user?.timeSlot || user?.appointmentTime || queueState?.timeSlot || "09:30 AM"}
-            </p>
-            <p className={`text-[10px] font-medium ${isCancelled ? 'text-rose-500' : isExpired ? 'text-amber-500 font-bold' : 'text-emerald-500'}`}>
-              {isCancelled ? 'Slot Cancelled' : isExpired ? 'Slot Expired (OPD Closed)' : 'Reporting Window Open'}
-            </p>
-          </div>
-
-          <div className="p-3.5 bg-white dark:bg-slate-800/80 rounded-2xl border border-slate-200 dark:border-slate-700/80 space-y-1">
-            <span className="text-slate-400 text-[10px] uppercase font-bold">Patient Name</span>
-            <p className="font-bold text-slate-900 dark:text-white truncate">
-              {user?.name || DEMO_PATIENT.name}
-            </p>
-            <p className="text-[10px] text-slate-500">
-              {user?.phone || DEMO_PATIENT.phone}
-            </p>
-          </div>
-        </div>
-      </div>
+      )}
 
       {/* Cancelled Notice Banner if appointment status is cancelled */}
       {isCancelled && (
@@ -1305,8 +1315,8 @@ export const ArrivalPrediction = () => {
         isOpen={isDispatchModalOpen}
         onClose={() => setIsDispatchModalOpen(false)}
         dispatchData={dispatchData}
-        patientName={user?.name || DEMO_PATIENT.name}
-        phone={user?.phone || DEMO_PATIENT.phone || "9876543210"}
+        patientName={user?.name || "Patient"}
+        phone={user?.phone || "9876543210"}
       />
 
       {/* Dual Mode Location Origin Picker Modal */}

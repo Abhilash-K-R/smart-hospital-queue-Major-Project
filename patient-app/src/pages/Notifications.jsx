@@ -13,7 +13,7 @@ export const Notifications = () => {
   const { notifications, unreadCount, markAsRead, markAllRead } = useNotification();
   const { user, setUser } = useAuth();
   const [filter, setFilter] = useState('All');
-  const [phone, setPhone] = useState(user?.phone || DEMO_PATIENT.phone || "9876543210");
+  const [phone, setPhone] = useState(user?.phone || "");
   const [isEditingPhone, setIsEditingPhone] = useState(false);
   const [phoneSaved, setPhoneSaved] = useState(false);
   const [isSendingTest, setIsSendingTest] = useState(false);
@@ -43,8 +43,8 @@ export const Notifications = () => {
     setIsSendingTest(true);
     try {
       const payload = {
-        patient_name: user?.name || DEMO_PATIENT.name,
-        phone: phone,
+        patient_name: user?.name || "Patient",
+        phone: phone || user?.phone || "9876543210",
         token_number: user?.tokenNumber || "OPD-011",
         doctor_name: user?.doctor || "Dr. Rajeswari R.",
         room_number: user?.roomNo || "Room 204",
