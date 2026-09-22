@@ -177,7 +177,11 @@ app.add_middleware(
 
 @app.get("/")
 def read_root():
-    return {"status": "alive", "db_configured": os.getenv("DATABASE_URL") is not None}
+    return {
+        "status": "alive",
+        "db_configured": os.getenv("DATABASE_URL") is not None,
+        "version": "v1.2-emergency-triage-deployed",
+    }
 
 
 
