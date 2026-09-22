@@ -22,6 +22,7 @@ from sqlmodel import Session, select, text
 from sqlalchemy import func
 from dotenv import load_dotenv
 
+from typing import List, Optional, Dict, Any, Union
 import os
 import re
 import requests
