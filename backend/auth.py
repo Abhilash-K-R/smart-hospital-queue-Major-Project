@@ -27,9 +27,9 @@ ALGORITHM = "HS256"  # standard signing algorithm for JWT, widely used and secur
 ACCESS_TOKEN_EXPIRE_MINUTES = 60  # tokens auto-expire after 1 hour, forcing re-login for security
 
 # passlib's CryptContext handles the actual hashing math for us — we never
-# write our own hashing algorithm, that's a well-known way to introduce
-# security bugs. bcrypt is a well-established, slow-by-design algorithm
-# (slow is GOOD here — it makes brute-force password guessing expensive).
+import bcrypt
+
+# passlib's CryptContext handles password hashing math
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 
@@ -42,7 +42,11 @@ def hash_password(plain_password: str) -> str:
     Converts a real password into a scrambled hash before we store it.
     We NEVER store plain-text passwords in the database.
     """
-    return pwd_context.hash(plain_password)
+    try:
+        return pwd_context.hash(plain_password)
+    except Exception:
+        salt = bcrypt.gensalt()
+        return bcrypt.hashpw(plain_password.encode('utf-8'), salt).decode('utf-8')
 
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
@@ -51,7 +55,13 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
     Returns True if they match, False otherwise.
     We never "unscramble" the hash — hashing is one-way by design.
     """
-    return pwd_context.verify(plain_password, hashed_password)
+    try:
+        return pwd_context.verify(plain_password, hashed_password)
+    except Exception:
+        try:
+            return bcrypt.checkpw(plain_password.encode('utf-8'), hashed_password.encode('utf-8'))
+        except Exception:
+            return False
 
 
 # ---------------------------------------------------------------------

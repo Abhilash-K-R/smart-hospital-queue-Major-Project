@@ -68,6 +68,35 @@ const Emergency = () => {
     setError('');
   };
 
+  // Auto-triage helper for previewing recommended specialty
+  const getAutoTriagePreview = () => {
+    if (doctorId) return null;
+    const complaintLower = (chiefComplaint || '').toLowerCase();
+    const patientAge = parseInt(age);
+
+    if ((patientAge && patientAge <= 14) || /baby|child|infant|kid|pediatric|toddler/.test(complaintLower)) {
+      return doctors.find(d => d.department?.toLowerCase().includes('pediatric')) || { name: 'Pediatrics Specialist', department: 'Pediatrics' };
+    }
+    if (/chest|heart|cardiac|palpitation|angina|attack|coronary|ecg|bp|hypertension/.test(complaintLower)) {
+      return doctors.find(d => d.department?.toLowerCase().includes('cardio')) || { name: 'Dr. Priya Sharma', department: 'Cardiology' };
+    }
+    if (/breath|lung|respiratory|asthma|spo2|oxygen|choking|wheez|cough/.test(complaintLower)) {
+      return doctors.find(d => d.department?.toLowerCase().includes('pulmon')) || { name: 'Dr. Manoj Kumar', department: 'Pulmonology' };
+    }
+    if (/stroke|seizure|head injury|unconscious|coma|faint|syncope|paralysis|brain/.test(complaintLower)) {
+      return doctors.find(d => d.department?.toLowerCase().includes('neuro')) || { name: 'Dr. Rajeshwar B.', department: 'Neurology' };
+    }
+    if (/fracture|bone|accident|trauma|joint|sprain|dislocation|fall|injury/.test(complaintLower)) {
+      return doctors.find(d => d.department?.toLowerCase().includes('ortho')) || { name: 'Dr. Vikram K. Rao', department: 'Orthopedics' };
+    }
+    if (/burn|skin|rash|allergy|anaphylaxis|bite|sting/.test(complaintLower)) {
+      return doctors.find(d => d.department?.toLowerCase().includes('derma')) || { name: 'Dr. Sneha Patil', department: 'Dermatology' };
+    }
+    return doctors.find(d => d.department?.toLowerCase().includes('general')) || { name: 'General Medicine Triage', department: 'General Medicine' };
+  };
+
+  const recommendedDoctor = getAutoTriagePreview();
+
   return (
     <div className="p-6 max-w-4xl mx-auto h-full overflow-y-auto">
       <div className="bg-red-50 border-l-4 border-red-500 p-4 rounded-r-lg mb-6 flex items-start gap-3">
@@ -81,8 +110,12 @@ const Emergency = () => {
       </div>
 
       {error && (
-        <div className="mb-6 bg-red-100 border border-red-300 text-red-800 p-4 rounded-xl text-sm">
-          {error}
+        <div className="mb-6 bg-red-100 border border-red-300 text-red-800 p-4 rounded-xl text-sm flex items-start gap-2">
+          <AlertTriangle className="h-5 w-5 text-red-600 flex-shrink-0 mt-0.5" />
+          <div>
+            <p className="font-semibold">Unable to Declare Emergency:</p>
+            <p>{error}</p>
+          </div>
         </div>
       )}
 
@@ -183,13 +216,21 @@ const Emergency = () => {
                 onChange={(e) => setDoctorId(e.target.value)}
                 className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500 focus:border-red-500 text-sm"
               >
-                <option value="">Auto-Assign to Available Doctor</option>
+                <option value="">Auto-Assign to Available Doctor (Clinical Triage)</option>
                 {doctors.map(d => (
                   <option key={d.id} value={d.id}>
                     {d.name} ({d.department}) - Queue: {d.queue_length}
                   </option>
                 ))}
               </select>
+              {!doctorId && recommendedDoctor && (
+                <p className="text-xs text-blue-800 bg-blue-50 border border-blue-200 px-3 py-1.5 rounded-md mt-1.5 flex items-center gap-1.5">
+                  <Activity className="h-3.5 w-3.5 text-blue-600 flex-shrink-0" />
+                  <span>
+                    Auto-Triage Target: <strong>{recommendedDoctor.name}</strong> ({recommendedDoctor.department})
+                  </span>
+                </p>
+              )}
             </div>
           </div>
 
@@ -200,7 +241,7 @@ const Emergency = () => {
               rows={3} 
               value={chiefComplaint}
               onChange={(e) => setChiefComplaint(e.target.value)}
-              placeholder="E.g., Severe crushing retrosternal chest pain, radiating to left arm, shortness of breath..." 
+              placeholder="E.g., heart pain, chest tightness, shortness of breath, fracture, seizure..." 
               className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500 focus:border-red-500"
             ></textarea>
           </div>

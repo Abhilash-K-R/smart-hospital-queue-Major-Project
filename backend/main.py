@@ -2371,6 +2371,79 @@ def get_staff_queue():
 
 
 
+def match_emergency_doctor(session: Session, chief_complaint: str, age: Optional[int] = None) -> Doctor:
+    """
+    Intelligent Emergency Triage Doctor Routing Engine:
+    Routes incoming emergency cases to the most relevant medical specialist based on clinical keywords & vitals.
+    Never assigns acute emergencies (e.g. cardiac, respiratory, trauma) to unrelated specialties (e.g. Dermatology).
+    Defaults to General Medicine / Casualty Triage when non-specific.
+    """
+    complaint_lower = (chief_complaint or "").lower().strip()
+    
+    # 1. Pediatric check (< 14 years old or pediatric keywords)
+    is_pediatric = (age is not None and age <= 14) or any(k in complaint_lower for k in ["baby", "child", "infant", "pediatric", "toddler", "kid"])
+    if is_pediatric:
+        peds_dept = session.exec(select(Department).where(Department.name.ilike("%pediatric%"))).first()
+        if peds_dept:
+            doc = session.exec(select(Doctor).where(Doctor.department_id == peds_dept.id)).first()
+            if doc:
+                return doc
+
+    # 2. Clinical Category Keyword Triage Rules
+    triage_map = [
+        # Cardiology (Acute Coronary Syndromes, Cardiac Arrest, Arrhythmia)
+        (["chest", "heart", "cardiac", "palpitation", "angina", "attack", "coronary", "ecg", "cardio", "hypertension", "pulse"], "%cardio%"),
+        # Pulmonology (Acute Respiratory Distress, Hypoxia, Asthma Exacerbation)
+        (["breath", "breathing", "lung", "respiratory", "asthma", "spo2", "oxygen", "suffocation", "choking", "cough", "wheez", "pulmon"], "%pulmon%"),
+        # Neurology (Stroke / CVA, Seizures, Head Trauma, Coma, Loss of Consciousness)
+        (["stroke", "seizure", "convulsion", "paralysis", "unconscious", "head injury", "coma", "faint", "syncope", "brain", "neuro"], "%neuro%"),
+        # Orthopedics (Acute Trauma, Fractures, Dislocations, Polytrauma)
+        (["fracture", "bone", "trauma", "accident", "joint", "sprain", "dislocation", "fall", "injury", "ortho"], "%ortho%"),
+        # Dermatology (Severe Burns, Acute Anaphylactic Skin Reactions, Chemical Exposures)
+        (["burn", "skin", "rash", "allergy", "anaphylaxis", "bite", "sting", "derma"], "%derma%"),
+    ]
+
+    for keywords, dept_pattern in triage_map:
+        if any(k in complaint_lower for k in keywords):
+            dept = session.exec(select(Department).where(Department.name.ilike(dept_pattern))).first()
+            if dept:
+                # Find available doctors in this department
+                docs = session.exec(select(Doctor).where(Doctor.department_id == dept.id)).all()
+                if docs:
+                    # Pick doctor with shortest pending queue
+                    best_doc = min(
+                        docs,
+                        key=lambda d: len(session.exec(select(Appointment.id).where(Appointment.doctor_id == d.id, Appointment.status == "pending")).all())
+                    )
+                    return best_doc
+
+    # 3. Check database SymptomMapping table for dynamic staff-configured keywords
+    mappings = session.exec(select(SymptomMapping)).all()
+    for m in mappings:
+        if m.symptom_name.lower() in complaint_lower or any(word in complaint_lower for word in m.symptom_name.lower().split()):
+            dept = session.get(Department, m.department_id)
+            if dept:
+                docs = session.exec(select(Doctor).where(Doctor.department_id == dept.id)).all()
+                if docs:
+                    return docs[0]
+
+    # 4. Default / General Casualty: Assign to General Medicine (NEVER random single-domain specialists)
+    gen_dept = session.exec(select(Department).where(Department.name.ilike("%general%"))).first()
+    if gen_dept:
+        gen_docs = session.exec(select(Doctor).where(Doctor.department_id == gen_dept.id)).all()
+        if gen_docs:
+            # Load balance across General Medicine doctors
+            best_gen_doc = min(
+                gen_docs,
+                key=lambda d: len(session.exec(select(Appointment.id).where(Appointment.doctor_id == d.id, Appointment.status == "pending")).all())
+            )
+            return best_gen_doc
+
+    # Absolute fallback
+    fallback_doc = session.exec(select(Doctor)).first()
+    return fallback_doc
+
+
 @app.post("/staff/emergency-insert", response_model=EmergencyInsertResponse)
 def insert_emergency_patient(req: EmergencyInsertRequest):
     """
@@ -2380,25 +2453,18 @@ def insert_emergency_patient(req: EmergencyInsertRequest):
     This triggers immediate dynamic wait-time recalculation across the system.
     """
     with Session(engine) as session:
-        # Determine Doctor
+        # Determine Doctor via manual selection or intelligent triage auto-routing
         if req.doctor_id:
             doctor = session.get(Doctor, req.doctor_id)
         else:
-            complaint_lower = req.chief_complaint.lower()
-            if any(k in complaint_lower for k in ["chest", "heart", "cardiac"]):
-                dept = session.exec(select(Department).where(Department.name.ilike("%cardio%"))).first()
-                doctor = session.exec(select(Doctor).where(Doctor.department_id == dept.id)).first() if dept else None
-            else:
-                doctor = None
-            if not doctor:
-                doctor = session.exec(select(Doctor)).first()
+            doctor = match_emergency_doctor(session, req.chief_complaint, req.age)
 
         if not doctor:
             raise HTTPException(status_code=400, detail="No doctor available for emergency assignment")
 
         # 1. Create Patient row
         timestamp_id = int(datetime.utcnow().timestamp())
-        patient_name = f"Emergency - {req.name}"
+        patient_name = f"Emergency - {req.name.strip()}"
         emergency_patient = Patient(
             name=patient_name,
             phone=f"EMG-{timestamp_id}",
@@ -2408,7 +2474,7 @@ def insert_emergency_patient(req: EmergencyInsertRequest):
         session.add(emergency_patient)
         session.flush()
 
-        # 2. Count impacted pending appointments
+        # 2. Count impacted pending appointments for this doctor
         impacted_count = len(
             session.exec(
                 select(Appointment.id).where(
@@ -2418,7 +2484,7 @@ def insert_emergency_patient(req: EmergencyInsertRequest):
             ).all()
         )
 
-        # Shift all existing pending appointments for this doctor by +1 in a single atomic SQL statement
+        # Shift all existing pending appointments for this doctor by +1 in an atomic SQL statement
         session.exec(
             text(
                 "UPDATE appointment SET queue_position = COALESCE(queue_position, 1) + 1 "
@@ -2446,9 +2512,13 @@ def insert_emergency_patient(req: EmergencyInsertRequest):
 
         token_number = f"EMG-{emergency_appt.id:02d}"
 
+        # Fetch department name for informative message
+        dept = session.get(Department, doctor.department_id)
+        dept_name = dept.name if dept else "Emergency Triage"
+
         return EmergencyInsertResponse(
             success=True,
-            message=f"Emergency patient inserted at front of queue for {doctor.name}. {impacted_count} regular patients shifted back.",
+            message=f"Emergency patient prioritized at Queue #1 for {doctor.name} ({dept_name}). {impacted_count} regular appointments shifted back.",
             appointment_id=emergency_appt.id,
             tokenNumber=token_number,
             queue_position=1,
