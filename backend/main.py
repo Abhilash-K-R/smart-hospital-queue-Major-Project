@@ -2452,78 +2452,86 @@ def insert_emergency_patient(req: EmergencyInsertRequest):
     Shifts all existing pending regular appointments for this doctor back by +1 position.
     This triggers immediate dynamic wait-time recalculation across the system.
     """
-    with Session(engine) as session:
-        # Determine Doctor via manual selection or intelligent triage auto-routing
-        if req.doctor_id:
-            doctor = session.get(Doctor, req.doctor_id)
-        else:
-            doctor = match_emergency_doctor(session, req.chief_complaint, req.age)
+    try:
+        with Session(engine) as session:
+            # Determine Doctor via manual selection or intelligent triage auto-routing
+            if req.doctor_id:
+                doctor = session.get(Doctor, req.doctor_id)
+            else:
+                doctor = match_emergency_doctor(session, req.chief_complaint, req.age)
 
-        if not doctor:
-            raise HTTPException(status_code=400, detail="No doctor available for emergency assignment")
+            if not doctor:
+                raise HTTPException(status_code=400, detail="No doctor available for emergency assignment")
 
-        # 1. Create Patient row
-        timestamp_id = int(datetime.utcnow().timestamp())
-        patient_name = f"Emergency - {req.name.strip()}"
-        emergency_patient = Patient(
-            name=patient_name,
-            phone=f"EMG-{timestamp_id}",
-            email=f"emg_{timestamp_id}@hospital.local",
-            password_hash=hash_password("Emergency@123"),
-        )
-        session.add(emergency_patient)
-        session.flush()
+            # 1. Create Patient row
+            timestamp_id = int(datetime.utcnow().timestamp())
+            patient_name = f"Emergency - {req.name.strip()}"
+            emergency_patient = Patient(
+                name=patient_name,
+                phone=f"EMG-{timestamp_id}",
+                email=f"emg_{timestamp_id}@hospital.local",
+                password_hash=hash_password("Emergency@123"),
+            )
+            session.add(emergency_patient)
+            session.flush()
 
-        # 2. Count impacted pending appointments for this doctor
-        impacted_count = len(
+            # 2. Count impacted pending appointments for this doctor
+            impacted_count = len(
+                session.exec(
+                    select(Appointment.id).where(
+                        Appointment.doctor_id == doctor.id,
+                        Appointment.status == "pending",
+                    )
+                ).all()
+            )
+
+            # Shift all existing pending appointments for this doctor by +1 in an atomic SQL statement
             session.exec(
-                select(Appointment.id).where(
-                    Appointment.doctor_id == doctor.id,
-                    Appointment.status == "pending",
-                )
-            ).all()
-        )
+                text(
+                    "UPDATE appointment SET queue_position = COALESCE(queue_position, 1) + 1 "
+                    "WHERE doctor_id = :doc_id AND status = 'pending'"
+                ).params(doc_id=doctor.id)
+            )
 
-        # Shift all existing pending appointments for this doctor by +1 in an atomic SQL statement
-        session.exec(
-            text(
-                "UPDATE appointment SET queue_position = COALESCE(queue_position, 1) + 1 "
-                "WHERE doctor_id = :doc_id AND status = 'pending'"
-            ).params(doc_id=doctor.id)
-        )
+            # 3. Create Emergency Appointment at Position 1
+            today_ist = datetime.now(IST).strftime("%Y-%m-%d")
+            emergency_appt = Appointment(
+                patient_id=emergency_patient.id,
+                doctor_id=doctor.id,
+                booked_time=datetime.utcnow(),
+                status="pending",
+                queue_position=1,
+                beneficiary_name=patient_name,
+                appointment_date=today_ist,
+                time_slot="00:00 AM - Emergency Triage",
+                contact_phone=f"EMG-{timestamp_id}",
+                is_dependent=False,
+            )
+            session.add(emergency_appt)
+            session.commit()
+            session.refresh(emergency_appt)
 
-        # 3. Create Emergency Appointment at Position 1
-        today_ist = datetime.now(IST).strftime("%Y-%m-%d")
-        emergency_appt = Appointment(
-            patient_id=emergency_patient.id,
-            doctor_id=doctor.id,
-            booked_time=datetime.utcnow(),
-            status="pending",
-            queue_position=1,
-            beneficiary_name=patient_name,
-            appointment_date=today_ist,
-            time_slot="00:00 AM - Emergency Triage",
-            contact_phone=f"EMG-{timestamp_id}",
-            is_dependent=False,
-        )
-        session.add(emergency_appt)
-        session.commit()
-        session.refresh(emergency_appt)
+            token_number = f"EMG-{emergency_appt.id:02d}"
 
-        token_number = f"EMG-{emergency_appt.id:02d}"
+            # Fetch department name for informative message
+            dept = session.get(Department, doctor.department_id)
+            dept_name = dept.name if dept else "Emergency Triage"
 
-        # Fetch department name for informative message
-        dept = session.get(Department, doctor.department_id)
-        dept_name = dept.name if dept else "Emergency Triage"
-
-        return EmergencyInsertResponse(
-            success=True,
-            message=f"Emergency patient prioritized at Queue #1 for {doctor.name} ({dept_name}). {impacted_count} regular appointments shifted back.",
-            appointment_id=emergency_appt.id,
-            tokenNumber=token_number,
-            queue_position=1,
-            impacted_patients=impacted_count,
-        )
+            return EmergencyInsertResponse(
+                success=True,
+                message=f"Emergency patient prioritized at Queue #1 for {doctor.name} ({dept_name}). {impacted_count} regular appointments shifted back.",
+                appointment_id=emergency_appt.id,
+                tokenNumber=token_number,
+                queue_position=1,
+                impacted_patients=impacted_count,
+            )
+    except HTTPException:
+        raise
+    except Exception as e:
+        import traceback
+        err_tb = traceback.format_exc()
+        print(f"CRITICAL ERROR in /staff/emergency-insert: {err_tb}")
+        raise HTTPException(status_code=500, detail=f"Emergency insert error: {str(e)}")
 
 
 @app.post("/staff/queue/call-next")
