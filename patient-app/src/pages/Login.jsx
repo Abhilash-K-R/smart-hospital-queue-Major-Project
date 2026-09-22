@@ -24,8 +24,8 @@ export const Login = () => {
   const { register, handleSubmit, setValue, formState: { errors } } = useForm({
     resolver: zodResolver(loginSchema),
     defaultValues: {
-      emailOrPhone: prefilledPhone || DEMO_PATIENT.email,
-      password: isJustRegistered ? "" : "password123"
+      emailOrPhone: prefilledPhone || "",
+      password: ""
     }
   });
 
@@ -44,14 +44,9 @@ export const Login = () => {
       });
       if (res && res.user) {
         login(res.user);
-        // If user has an active appointment, go to dashboard, else go to book appointment
-        if (res.user.appointment_id) {
-          navigate('/dashboard');
-        } else {
-          navigate('/appointment');
-        }
+        navigate('/dashboard');
       } else {
-        login({ ...DEMO_PATIENT, phone: data.emailOrPhone, email: data.emailOrPhone });
+        login({ name: "Patient", phone: data.emailOrPhone, email: data.emailOrPhone });
         navigate('/dashboard');
       }
     } catch (err) {

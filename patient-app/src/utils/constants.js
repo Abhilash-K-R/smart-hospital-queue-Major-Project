@@ -27,11 +27,11 @@ export const DEFAULT_PATIENT_LOCATION = {
 // Demo Mode Default Data
 export const DEMO_PATIENT = {
   id: "P-10928",
-  name: "Laxuman Ghotale",
-  age: 23,
+  name: "Registered Patient",
+  age: 28,
   gender: "Male",
   phone: "+91 98765 43210",
-  email: "laxuman.patient@shridevimediflow.ai",
+  email: "patient@shridevimediflow.ai",
   bloodGroup: "O+",
   tokenNumber: null,
   numericToken: null,
