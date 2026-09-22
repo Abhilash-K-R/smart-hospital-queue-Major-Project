@@ -1,9 +1,23 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Bell, UserCircle, AlertTriangle, CheckCircle, Clock, RefreshCw, X, ShieldAlert, Users, Info } from 'lucide-react';
+import { 
+  Bell, 
+  UserCircle, 
+  AlertTriangle, 
+  CheckCircle, 
+  Clock, 
+  RefreshCw, 
+  X, 
+  ShieldAlert, 
+  Users, 
+  Info,
+  Menu,
+  PanelLeftClose,
+  PanelLeft
+} from 'lucide-react';
 import { getStaffUser } from '../services/auth';
 import api from '../services/api';
 
-const Header = () => {
+const Header = ({ isCollapsed, toggleSidebar, toggleMobileSidebar }) => {
   const staff = getStaffUser();
   const [isOpen, setIsOpen] = useState(false);
   const [notifications, setNotifications] = useState([]);
@@ -120,12 +134,41 @@ const Header = () => {
   };
 
   return (
-    <header className="h-16 bg-white border-b border-slate-200 flex items-center justify-between px-6 sticky top-0 z-30">
-      <div className="flex items-center gap-4">
-        <h2 className="text-xl font-semibold text-slate-800">Hospital Staff Operations Portal</h2>
+    <header className="h-16 bg-white border-b border-slate-200/90 flex items-center justify-between px-3 sm:px-6 sticky top-0 z-30 shadow-xs">
+      <div className="flex items-center gap-2 sm:gap-4">
+        {/* Mobile Hamburger Menu Toggle */}
+        <button
+          type="button"
+          onClick={toggleMobileSidebar}
+          className="md:hidden p-2 text-slate-600 hover:text-blue-600 hover:bg-slate-100 rounded-xl transition-colors"
+          aria-label="Open navigation menu"
+        >
+          <Menu className="w-5 h-5" />
+        </button>
+
+        {/* Desktop Sidebar Collapse Toggle */}
+        <button
+          type="button"
+          onClick={toggleSidebar}
+          title={isCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+          className="hidden md:flex p-2 text-slate-500 hover:text-blue-600 hover:bg-slate-100 rounded-xl transition-colors"
+          aria-label="Toggle sidebar collapse"
+        >
+          {isCollapsed ? <PanelLeft className="w-5 h-5" /> : <PanelLeftClose className="w-5 h-5" />}
+        </button>
+
+        {/* Title */}
+        <div>
+          <h2 className="text-sm sm:text-base md:text-lg font-bold text-slate-800 tracking-tight truncate max-w-[200px] sm:max-w-none">
+            Shridevi Staff Portal
+          </h2>
+          <p className="text-[10px] text-slate-400 font-medium hidden sm:block">
+            AI Zero-Wait OPD Triage & Management
+          </p>
+        </div>
       </div>
       
-      <div className="flex items-center gap-6">
+      <div className="flex items-center gap-3 sm:gap-5">
         {/* Notification Bell with Dropdown */}
         <div className="relative" ref={dropdownRef}>
           <button 
@@ -134,7 +177,7 @@ const Header = () => {
               setIsOpen(!isOpen);
               if (!isOpen) fetchNotifications();
             }}
-            className="relative p-2 text-slate-500 hover:text-slate-700 transition-colors rounded-full hover:bg-slate-100 focus:outline-none"
+            className="relative p-2 text-slate-500 hover:text-slate-700 transition-colors rounded-xl hover:bg-slate-100 focus:outline-none"
             aria-label="Staff Notifications"
           >
             <Bell className="h-5 w-5" />
@@ -147,7 +190,7 @@ const Header = () => {
 
           {/* Notifications Dropdown Panel */}
           {isOpen && (
-            <div className="absolute right-0 mt-2 w-80 sm:w-96 bg-white rounded-2xl shadow-2xl border border-slate-200 overflow-hidden z-50 animate-in fade-in slide-in-from-top-2 duration-150">
+            <div className="absolute right-0 mt-2 w-[calc(100vw-2rem)] max-w-sm sm:w-96 bg-white rounded-2xl shadow-2xl border border-slate-200 overflow-hidden z-50 animate-in fade-in slide-in-from-top-2 duration-150">
               <div className="p-4 bg-slate-50 border-b border-slate-200 flex items-center justify-between">
                 <div className="flex items-center gap-2">
                   <Bell className="w-4 h-4 text-blue-600" />
@@ -226,12 +269,17 @@ const Header = () => {
           )}
         </div>
         
-        <div className="flex items-center gap-3 pl-4 border-l border-slate-200">
+        {/* User Profile Info */}
+        <div className="flex items-center gap-2 sm:gap-3 pl-3 sm:pl-4 border-l border-slate-200">
           <div className="text-right hidden sm:block">
-            <p className="text-sm font-semibold text-slate-800">{staff.name || 'Reception Desk 1'}</p>
-            <p className="text-xs text-blue-600 font-medium capitalize">{staff.role || 'OPD Staff'}</p>
+            <p className="text-xs sm:text-sm font-semibold text-slate-800 truncate max-w-[120px]">
+              {staff.name || 'Reception Desk 1'}
+            </p>
+            <p className="text-[10px] sm:text-xs text-blue-600 font-medium capitalize truncate">
+              {staff.role || 'OPD Staff'}
+            </p>
           </div>
-          <UserCircle className="h-8 w-8 text-blue-600" />
+          <UserCircle className="h-7 w-7 sm:h-8 sm:w-8 text-blue-600 shrink-0" />
         </div>
       </div>
     </header>

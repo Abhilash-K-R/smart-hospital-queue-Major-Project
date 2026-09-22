@@ -40,19 +40,19 @@ export const Navbar = () => {
 
   return (
     <header className="sticky top-0 z-40 w-full glass-panel border-b border-slate-200/80 dark:border-slate-800/80 backdrop-blur-xl">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-20 flex items-center justify-between">
+      <div className="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 h-16 sm:h-20 flex items-center justify-between">
         
         {/* Brand Logo */}
-        <Link to="/" className="flex items-center gap-3 group">
-          <div className="w-11 h-11 rounded-2xl bg-gradient-to-tr from-blue-600 via-blue-500 to-cyan-400 flex items-center justify-center text-white shadow-lg shadow-blue-500/30 group-hover:scale-105 transition-transform duration-200">
-            <Activity className="w-6 h-6 animate-pulse" />
+        <Link to="/" className="flex items-center gap-2 sm:gap-3 group min-w-0">
+          <div className="w-9 h-9 sm:w-11 sm:h-11 rounded-xl sm:rounded-2xl bg-gradient-to-tr from-blue-600 via-blue-500 to-cyan-400 flex items-center justify-center text-white shadow-lg shadow-blue-500/30 group-hover:scale-105 transition-transform duration-200 shrink-0">
+            <Activity className="w-5 h-5 sm:w-6 sm:h-6 animate-pulse" />
           </div>
-          <div>
-            <div className="flex items-center gap-1.5">
-              <span className="text-lg font-black tracking-tight text-slate-900 dark:text-white">Shridevi MediFlow</span>
-              <span className="px-1.5 py-0.5 text-[10px] uppercase font-extrabold bg-cyan-500 text-white rounded-md shadow-sm">AI</span>
+          <div className="min-w-0">
+            <div className="flex items-center gap-1 sm:gap-1.5">
+              <span className="text-sm sm:text-lg font-black tracking-tight text-slate-900 dark:text-white truncate">Shridevi MediFlow</span>
+              <span className="px-1 py-0.2 sm:px-1.5 sm:py-0.5 text-[9px] sm:text-[10px] uppercase font-extrabold bg-cyan-500 text-white rounded-md shadow-xs shrink-0">AI</span>
             </div>
-            <p className="text-[10px] font-semibold text-slate-500 dark:text-slate-400">Shridevi Hospital, Tumakuru</p>
+            <p className="text-[9px] sm:text-[10px] font-semibold text-slate-500 dark:text-slate-400 truncate hidden xs:block">Shridevi Hospital, Tumakuru</p>
           </div>
         </Link>
 
