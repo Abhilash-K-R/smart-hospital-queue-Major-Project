@@ -2341,11 +2341,15 @@ def get_staff_queue():
             primary_patient_name = pat.name if pat else f"Patient #{appt.patient_id}"
             is_dep = bool(appt.is_dependent)
             attendee_name = appt.beneficiary_name or primary_patient_name
-            attendee_age = appt.beneficiary_age or 35
+            attendee_age = appt.beneficiary_age if appt.beneficiary_age is not None else (35 if not ("Emergency" in attendee_name) else 25)
             attendee_gender = appt.beneficiary_gender or "Male"
-            contact_phone = appt.contact_phone or (pat.phone if pat else "9876543210")
 
+            raw_phone = appt.contact_phone or (pat.phone if pat else "")
             is_emergency = "Emergency" in attendee_name or "Critical" in attendee_name
+            if is_emergency:
+                contact_phone = raw_phone if (raw_phone and not raw_phone.startswith("EMG-")) else "Emergency Walk-In"
+            else:
+                contact_phone = raw_phone or "9876543210"
             if is_emergency:
                 triage = "Critical"
             elif pos <= 2 and appt.status != "serving":
@@ -2518,6 +2522,7 @@ def insert_emergency_patient(req: EmergencyInsertRequest):
 
             # 3. Create Emergency Appointment at Position 1
             today_ist = datetime.now(IST).strftime("%Y-%m-%d")
+            clean_phone = req.contact_phone.strip() if req.contact_phone else "Emergency Walk-In"
             emergency_appt = Appointment(
                 patient_id=emergency_patient.id,
                 doctor_id=doctor.id,
@@ -2525,9 +2530,11 @@ def insert_emergency_patient(req: EmergencyInsertRequest):
                 status="pending",
                 queue_position=1,
                 beneficiary_name=patient_name,
+                beneficiary_age=int(req.age) if req.age is not None else 25,
+                beneficiary_gender=req.gender or "Male",
                 appointment_date=today_ist,
                 time_slot="00:00 AM - Emergency Triage",
-                contact_phone=f"EMG-{timestamp_id}",
+                contact_phone=clean_phone,
                 is_dependent=False,
             )
             session.add(emergency_appt)

@@ -16,6 +16,7 @@ const Emergency = () => {
   const [gender, setGender] = useState('Male');
   const [chiefComplaint, setChiefComplaint] = useState('');
   const [doctorId, setDoctorId] = useState('');
+  const [contactPhone, setContactPhone] = useState('');
   const [bloodPressure, setBloodPressure] = useState('140/90');
   const [heartRate, setHeartRate] = useState(105);
   const [spo2, setSpo2] = useState(94);
@@ -46,6 +47,7 @@ const Emergency = () => {
         gender,
         chief_complaint: chiefComplaint,
         doctor_id: doctorId ? parseInt(doctorId) : null,
+        contact_phone: contactPhone.trim() || null,
         blood_pressure: bloodPressure,
         heart_rate: parseInt(heartRate) || 85,
         spo2: parseInt(spo2) || 98,
@@ -64,6 +66,7 @@ const Emergency = () => {
   const handleReset = () => {
     setName('');
     setChiefComplaint('');
+    setContactPhone('');
     setSuccessData(null);
     setError('');
   };
@@ -231,6 +234,18 @@ const Emergency = () => {
                   </span>
                 </p>
               )}
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-1">Attendant / Bystander Mobile (Optional)</label>
+              <input 
+                type="tel" 
+                value={contactPhone}
+                onChange={(e) => setContactPhone(e.target.value)}
+                placeholder="e.g. 9876543210 (Leave empty if unescorted)" 
+                className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500 focus:border-red-500 text-sm" 
+              />
+              <p className="text-xs text-slate-400 mt-1">Optional. Emergency triage is never delayed for phone numbers.</p>
             </div>
           </div>
 
