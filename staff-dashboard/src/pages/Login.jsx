@@ -19,7 +19,7 @@ const Login = () => {
       await login(email, password);
       navigate('/dashboard');
     } catch (err) {
-      setError(err.response?.data?.detail || err.message || 'Failed to login. Please try again.');
+      setError(err.message || err.response?.data?.detail || 'Invalid staff credentials. Access not authorized.');
     } finally {
       setLoading(false);
     }
