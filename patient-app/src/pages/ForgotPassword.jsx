@@ -48,7 +48,10 @@ export const ForgotPassword = () => {
   const onSendOTP = async (data) => {
     setErrorMsg('');
     setLoading(true);
-    const cleanPhone = String(data.phone || '').replace(/\D/g, '');
+    let cleanPhone = String(data.phone || '').replace(/\D/g, '');
+    if (cleanPhone.length > 10 && cleanPhone.startsWith('91')) {
+      cleanPhone = cleanPhone.slice(2);
+    }
     if (cleanPhone.length !== 10) {
       setErrorMsg('Please enter a valid 10-digit Indian mobile number');
       setLoading(false);
@@ -64,7 +67,7 @@ export const ForgotPassword = () => {
       setResetValue('otp', returnedOtp);
       setStep(2);
     } catch (err) {
-      const msg = err.response?.data?.detail || 'No patient account registered with this mobile number.';
+      const msg = err.response?.data?.detail || (err.message === 'Network Error' ? 'Network error: could not connect to server. Please ensure backend is running.' : err.message) || 'No patient account registered with this mobile number.';
       setErrorMsg(msg);
     } finally {
       setLoading(false);
@@ -82,10 +85,15 @@ export const ForgotPassword = () => {
       return;
     }
 
+    let cleanPhone = String(phone || '').replace(/\D/g, '');
+    if (cleanPhone.length > 10 && cleanPhone.startsWith('91')) {
+      cleanPhone = cleanPhone.slice(2);
+    }
+
     setLoading(true);
     try {
       const res = await patientService.resetPassword({
-        phone: phone,
+        phone: cleanPhone,
         otp: data.otp || '123456',
         newPassword: data.newPassword
       });
@@ -93,11 +101,11 @@ export const ForgotPassword = () => {
       if (res && res.success) {
         setSuccessMsg('Password reset successfully! Redirecting to login...');
         setTimeout(() => {
-          navigate(`/login?reset=true&phone=${phone}`);
+          navigate(`/login?reset=true&phone=${cleanPhone}`);
         }, 1500);
       }
     } catch (err) {
-      const msg = err.response?.data?.detail || 'Failed to reset password. Please check the OTP.';
+      const msg = err.response?.data?.detail || (err.message === 'Network Error' ? 'Network error: could not connect to server. Please try again.' : err.message) || 'Failed to reset password. Please check the OTP.';
       setErrorMsg(msg);
     } finally {
       setLoading(false);

@@ -470,4 +470,42 @@ class SymptomAnalyzeResult(BaseModel):
 
 class SymptomAnalyzeResponse(BaseModel):
     results: list[SymptomAnalyzeResult]
+
+
+# ---------------------------------------------------------------------
+# PHASE 8: OFFLINE WALK-IN & DOCTOR ROOM CONSULTATION SCHEMAS
+# ---------------------------------------------------------------------
+
+class StaffWalkInRegisterRequest(BaseModel):
+    patient_name: str
+    phone: str
+    age: Optional[int] = 35
+    gender: Optional[str] = "Male"
+    doctor_id: Optional[int] = None
+    doctor_name: Optional[str] = None
+    department: Optional[str] = "General Medicine"
+    time_slot: Optional[str] = None
+    symptoms: Optional[str] = "Walk-in OPD Consultation"
+
+
+class StaffWalkInRegisterResponse(BaseModel):
+    success: bool = True
+    message: str
+    appointment_id: int
+    tokenNumber: str
+    numericToken: int
+    patient_name: str
+    age: int
+    gender: str
+    phone: str
+    doctor: str
+    department: str
+    roomNo: str
+    time_slot: str
+    appointment_date: str
+    queue_position: int
+    patientsAhead: int
+    estimatedWaitMinutes: float
+    booked_time: str
+
 

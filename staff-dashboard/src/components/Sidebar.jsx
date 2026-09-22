@@ -15,6 +15,7 @@ const Sidebar = () => {
   const navItems = [
     { name: 'Dashboard', path: '/dashboard', icon: LayoutDashboard },
     { name: 'Live Queue', path: '/queue', icon: Users },
+    { name: 'Doctor Room', path: '/doctor-room', icon: Stethoscope },
     { name: 'Emergency', path: '/emergency', icon: AlertTriangle },
     { name: 'Symptom Mapping', path: '/mapping', icon: Stethoscope },
   ];

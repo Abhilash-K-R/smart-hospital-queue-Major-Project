@@ -40,9 +40,19 @@ export const PINCODE_DATABASE = {
   "560064": { name: "Yelahanka / North Bengaluru", lat: 13.1007, lng: 77.5963, district: "Bengaluru Urban", tag: "Yelahanka" },
   "562159": { name: "Doddaballapura Town", lat: 13.2929, lng: 77.5413, district: "Bengaluru Rural", tag: "Doddaballapura" },
 
-  // Central Karnataka / Davanagere Region
+  // Central Karnataka / Davanagere & Chitradurga Region
   "577002": { name: "Davanagere City / PB Road", lat: 14.4644, lng: 75.9218, district: "Davanagere", tag: "Davanagere Central" },
-  "577001": { name: "Davanagere Main / Gandhi Circle", lat: 14.4589, lng: 75.9192, district: "Davanagere", tag: "Davanagere Main" }
+  "577001": { name: "Davanagere Main / Gandhi Circle", lat: 14.4589, lng: 75.9192, district: "Davanagere", tag: "Davanagere Main" },
+  "577004": { name: "Davanagere Vidyanagar / MCC", lat: 14.4750, lng: 75.9320, district: "Davanagere", tag: "Vidyanagar" },
+  "577005": { name: "Davanagere Industrial Area", lat: 14.4820, lng: 75.9080, district: "Davanagere", tag: "Industrial Area" },
+  "577525": { name: "Holalkere / Chitradurga Region", lat: 14.0322, lng: 76.1843, district: "Chitradurga", tag: "Holalkere" },
+  "577501": { name: "Chitradurga Fort City", lat: 14.2251, lng: 76.3980, district: "Chitradurga", tag: "Chitradurga" },
+  "577533": { name: "Hosadurga Town", lat: 13.7997, lng: 76.2863, district: "Chitradurga", tag: "Hosadurga" },
+  "577544": { name: "Hiriyur Town & Highway", lat: 13.9554, lng: 76.6186, district: "Chitradurga", tag: "Hiriyur" },
+  "577527": { name: "Jagalur Town", lat: 14.5204, lng: 76.3475, district: "Davanagere", tag: "Jagalur" },
+  "577522": { name: "Channagiri Town", lat: 14.0267, lng: 75.9312, district: "Davanagere", tag: "Channagiri" },
+  "577201": { name: "Shivamogga City Center", lat: 13.9299, lng: 75.5681, district: "Shivamogga", tag: "Shivamogga" },
+  "577101": { name: "Chikkamagaluru Town", lat: 13.3161, lng: 75.7720, district: "Chikkamagaluru", tag: "Chikkamagaluru" }
 };
 
 // Popular 1-Click Presets for Quick Patient Selection & Demonstration Tiers

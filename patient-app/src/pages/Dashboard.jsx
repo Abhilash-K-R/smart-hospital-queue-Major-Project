@@ -17,7 +17,8 @@ export const Dashboard = () => {
   const { user } = useAuth();
   const { queueState } = useQueue();
 
-  const hasActiveToken = Boolean(queueState.hasActiveToken || queueState.tokenNumber || user?.tokenNumber);
+  const activeToken = queueState.tokenNumber || user?.tokenNumber || (user?.appointment_id ? `OPD-${String(user.appointment_id).padStart(3, '0')}` : null);
+  const hasActiveToken = Boolean(queueState.hasActiveToken || activeToken);
 
   return (
     <div className="space-y-8">
@@ -42,16 +43,18 @@ export const Dashboard = () => {
           {hasActiveToken ? (
             <>
               {/* Active Token Card */}
-              <QueueCard queueData={queueState} />
+              <QueueCard queueData={{ ...queueState, tokenNumber: activeToken }} />
 
               {/* Circular & Linear Queue Progression Radar */}
               <ProgressCard
-                tokenNumber={queueState.tokenNumber}
+                tokenNumber={activeToken}
                 currentToken={queueState.currentToken}
-                numericToken={queueState.numericToken}
+                numericToken={queueState.numericToken || user?.numericToken || user?.appointment_id}
                 patientsAhead={queueState.patientsAhead}
                 estimatedWaitMinutes={queueState.estimatedWaitMinutes}
                 emergencyCount={queueState.emergencyCount}
+                status={queueState.status}
+                isExpired={queueState.isExpired}
               />
             </>
           ) : (

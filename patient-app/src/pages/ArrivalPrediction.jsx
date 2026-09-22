@@ -6,7 +6,7 @@ import { queueService } from '../services/queueService';
 import { patientService } from '../services/patientService';
 import { notificationService } from '../services/notificationService';
 import { useLocationResolver } from '../hooks/useLocationResolver';
-import { LOCATION_PRESETS, resolvePincode, PINCODE_DATABASE } from '../utils/locationResolver';
+import { LOCATION_PRESETS, resolvePincode, PINCODE_DATABASE, cleanseLocationName } from '../utils/locationResolver';
 import { TopBar } from '../components/TopBar';
 import { Button } from '../components/Button';
 import MobileDispatchModal from '../components/MobileDispatchModal';
@@ -76,11 +76,32 @@ export const ArrivalPrediction = () => {
   const [isDeparted, setIsDeparted] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
 
-  // Cancellation State
+  // Cancellation & Expiration State
   const [isCancelModalOpen, setIsCancelModalOpen] = useState(false);
   const [isCancelling, setIsCancelling] = useState(false);
   const [cancelToast, setCancelToast] = useState(null);
   const [isCancelled, setIsCancelled] = useState(user?.status === 'cancelled');
+
+  // Check if appointment is in the past or today past 8:00 PM (OPD hours: 09:00 AM - 08:00 PM)
+  const isPastOPDHours = () => {
+    const rawDate = user?.appointmentDate || user?.appointment_date || user?.date;
+    const now = new Date();
+    if (rawDate && rawDate !== "Today") {
+      const parsed = new Date(rawDate);
+      if (!isNaN(parsed.getTime())) {
+        const todayZero = new Date();
+        todayZero.setHours(0, 0, 0, 0);
+        const parsedZero = new Date(parsed);
+        parsedZero.setHours(0, 0, 0, 0);
+        if (parsedZero < todayZero) return true;
+      }
+    }
+    // If appointment is for today or default, check if past 20:00 (8:00 PM)
+    if (now.getHours() >= 20) return true;
+    return false;
+  };
+
+  const isExpired = user?.status === 'expired' || queueState?.status === 'expired' || isPastOPDHours();
 
   // In-card Pincode & Beneficiary State for Mode B
   const [customSearchQuery, setCustomSearchQuery] = useState(locationState?.pincode || locationState?.name || '');
@@ -89,6 +110,18 @@ export const ArrivalPrediction = () => {
   const [isCardSearching, setIsCardSearching] = useState(false);
   const [showCardDropdown, setShowCardDropdown] = useState(false);
   const cardDropdownRef = useRef(null);
+  const isSelectingCardRef = useRef(false);
+
+  // Close Mode B card dropdown when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (e) => {
+      if (cardDropdownRef.current && !cardDropdownRef.current.contains(e.target)) {
+        setShowCardDropdown(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
 
   // Mobile dispatch simulator state
   const [isDispatchModalOpen, setIsDispatchModalOpen] = useState(false);
@@ -103,8 +136,8 @@ export const ArrivalPrediction = () => {
     const bufferMins = 15; // 15-minute buffer requirement
 
     // Check if appointment has a specific future date and time slot
-    const rawDate = user?.appointmentDate || user?.date;
-    const rawTime = user?.timeSlot || user?.appointmentTime;
+    const rawDate = user?.appointmentDate || user?.appointment_date || user?.date || queueState?.appointmentDate;
+    const rawTime = user?.timeSlot || user?.appointmentTime || user?.time_slot || queueState?.timeSlot || "10:30 AM";
 
     if (rawTime) {
       let hours = 0;
@@ -131,8 +164,14 @@ export const ArrivalPrediction = () => {
         if (targetSlot.getTime() > now.getTime()) {
           const targetArrivalMs = targetSlot.getTime() - (bufferMins * 60 * 1000);
           const optimalLeaveMs = targetArrivalMs - (travelMins * 60 * 1000);
-          const diffSecs = Math.floor((optimalLeaveMs - now.getTime()) / 1000);
-          return Math.max(0, diffSecs);
+          if (now.getTime() < optimalLeaveMs) {
+            const diffSecs = Math.floor((optimalLeaveMs - now.getTime()) / 1000);
+            return Math.max(0, diffSecs);
+          } else {
+            // Already inside the departure window -> count down remaining time to slot arrival
+            const remainingToArrival = Math.floor((targetArrivalMs - now.getTime()) / 1000);
+            return Math.max(0, remainingToArrival);
+          }
         }
       }
     }
@@ -143,18 +182,19 @@ export const ArrivalPrediction = () => {
       : (queueState.estimatedWaitMinutes || 35);
     const minutesUntilDeparture = predictedWait - (travelMins + bufferMins);
 
-    if (resData?.should_leave_now || minutesUntilDeparture <= 0) {
-      return 0;
+    if (minutesUntilDeparture > 0) {
+      return Math.round(minutesUntilDeparture * 60);
     }
-    return Math.max(0, Math.round(minutesUntilDeparture * 60));
-  }, [user, queueState.estimatedWaitMinutes, queueState.trafficDurationMinutes]);
+    // In immediate departure zone: count down remaining wait time to doctor consultation
+    return Math.max(0, Math.round(predictedWait * 60));
+  }, [user, queueState.estimatedWaitMinutes, queueState.trafficDurationMinutes, queueState.timeSlot, queueState.appointmentDate]);
 
   const prevCoordsRef = useRef({ lat: null, lng: null });
   const isFetchingRef = useRef(false);
 
   // Fetch real departure prediction from FastAPI backend based on active resolved coordinates
   const fetchPrediction = useCallback(async (forced = false) => {
-    if (isCancelled || user?.status === 'cancelled') {
+    if (isCancelled || user?.status === 'cancelled' || isExpired) {
       setIsLoading(false);
       return;
     }
@@ -196,24 +236,24 @@ export const ArrivalPrediction = () => {
       setIsLoading(false);
       isFetchingRef.current = false;
     }
-  }, [user?.appointment_id, user?.appointmentId, user?.status, coords?.lat, coords?.lng, isCancelled, calculateSecondsToDeparture]);
+  }, [user?.appointment_id, user?.appointmentId, user?.status, coords?.lat, coords?.lng, isCancelled, isExpired, calculateSecondsToDeparture]);
 
   // Synchronize metric cards and departure calculation immediately whenever location coordinates change
   useEffect(() => {
-    if (isCancelled || user?.status === 'cancelled') return;
+    if (isCancelled || user?.status === 'cancelled' || isExpired) return;
     if (coords?.lat && coords?.lng) {
       fetchPrediction(true);
     }
-  }, [coords?.lat, coords?.lng, isCancelled, user?.status]);
+  }, [coords?.lat, coords?.lng, isCancelled, user?.status, isExpired, fetchPrediction]);
 
   // Periodic background re-check every 60 seconds (non-hammering)
   useEffect(() => {
-    if (isCancelled || user?.status === 'cancelled') return;
+    if (isCancelled || user?.status === 'cancelled' || isExpired) return;
     const interval = setInterval(() => {
       fetchPrediction(true);
     }, 60000);
     return () => clearInterval(interval);
-  }, [fetchPrediction, isCancelled, user?.status]);
+  }, [fetchPrediction, isCancelled, user?.status, isExpired]);
 
   // Departure Countdown Timer Tick
   useEffect(() => {
@@ -226,10 +266,16 @@ export const ArrivalPrediction = () => {
 
   // Debounced search for In-Card Mode B search input
   useEffect(() => {
+    if (isSelectingCardRef.current) {
+      isSelectingCardRef.current = false;
+      return;
+    }
+
     const clean = customSearchQuery.trim();
     if (!clean || clean.length < 2) {
       setCardSearchResults([]);
       setIsCardSearching(false);
+      setShowCardDropdown(false);
       return;
     }
 
@@ -280,6 +326,15 @@ export const ArrivalPrediction = () => {
 
   // Format countdown string supporting days, hours, MM:SS and immediate departure
   const formatCountdownInfo = (totalSecs) => {
+    if (isExpired && !isCancelled) {
+      return {
+        timeFormatted: "CLOSED",
+        badgeText: "⚠️ OPD Closed for Today",
+        isImmediate: false,
+        description: "Hospital OPD consultations concluded at 8:00 PM. Departure alarms and live queue calculations are closed for today. Please schedule an appointment for tomorrow."
+      };
+    }
+
     if (!coords) {
       return {
         timeFormatted: "--:--",
@@ -289,7 +344,13 @@ export const ArrivalPrediction = () => {
       };
     }
 
-    if (totalSecs <= 0 || (departureData?.should_leave_now && !isDeparted)) {
+    const days = Math.floor(totalSecs / 86400);
+    const hours = Math.floor((totalSecs % 86400) / 3600);
+    const mins = Math.floor((totalSecs % 3600) / 60);
+    const secs = totalSecs % 60;
+    const mmss = `${mins < 10 ? '0' : ''}${mins}:${secs < 10 ? '0' : ''}${secs}`;
+
+    if (totalSecs <= 0) {
       return {
         timeFormatted: "00:00",
         badgeText: "🚨 LEAVE NOW FOR HOSPITAL",
@@ -298,10 +359,14 @@ export const ArrivalPrediction = () => {
       };
     }
 
-    const days = Math.floor(totalSecs / 86400);
-    const hours = Math.floor((totalSecs % 86400) / 3600);
-    const mins = Math.floor((totalSecs % 3600) / 60);
-    const secs = totalSecs % 60;
+    if (departureData?.should_leave_now && !isDeparted) {
+      return {
+        timeFormatted: mmss,
+        badgeText: "🚨 LEAVE NOW FOR HOSPITAL",
+        isImmediate: true,
+        description: `Commute: ~${departureData?.travel_time_minutes || 15} mins. ${mmss} remaining until your scheduled consultation window.`
+      };
+    }
 
     if (days >= 1) {
       return {
@@ -320,7 +385,6 @@ export const ArrivalPrediction = () => {
       };
     }
 
-    const mmss = `${mins < 10 ? '0' : ''}${mins}:${secs < 10 ? '0' : ''}${secs}`;
     return {
       timeFormatted: mmss,
       badgeText: `${mmss} left`,
@@ -330,7 +394,7 @@ export const ArrivalPrediction = () => {
   };
 
   const countdownInfo = formatCountdownInfo(secondsLeft);
-  const shouldLeaveNow = departureData?.should_leave_now || (secondsLeft <= 0 && departureData !== null && !isDeparted);
+  const shouldLeaveNow = !isExpired && !isCancelled && (departureData?.should_leave_now || (secondsLeft <= 0 && departureData !== null && !isDeparted));
 
   // Format date helper for the TIME SLOT card
   const getFormattedDate = () => {
@@ -345,7 +409,7 @@ export const ArrivalPrediction = () => {
     return new Date().toLocaleDateString('en-US', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' });
   };
 
-  const activeTokenNumber = user?.tokenNumber || queueState.tokenNumber || DEMO_PATIENT.tokenNumber;
+  const activeTokenNumber = user?.tokenNumber || queueState.tokenNumber || (user?.appointment_id ? `OPD-${String(user.appointment_id).padStart(3, '0')}` : DEMO_PATIENT.tokenNumber);
   const activeApptId = user?.appointment_id || user?.appointmentId || user?.id || 1;
 
   // Handle appointment cancellation
@@ -376,9 +440,12 @@ export const ArrivalPrediction = () => {
 
   // Handle in-card selection from search dropdown
   const handleSelectCardResult = (item) => {
-    setCustomSearchQuery(item.name);
+    isSelectingCardRef.current = true;
+    const cleanName = cleanseLocationName(item.name);
+    setCustomSearchQuery(cleanName);
     setShowCardDropdown(false);
-    setManualLocationCustom(item, {
+    setCardSearchResults([]);
+    setManualLocationCustom({ ...item, name: cleanName }, {
       isFamilyBooking: true,
       beneficiaryName: beneficiaryInput.trim() || 'Family Member'
     });
@@ -386,11 +453,14 @@ export const ArrivalPrediction = () => {
 
   // Handle Preset Click in Mode B
   const handlePresetSelect = (preset) => {
-    setCustomSearchQuery(preset.name);
+    isSelectingCardRef.current = true;
+    const cleanName = cleanseLocationName(preset.name);
+    setCustomSearchQuery(cleanName);
     setShowCardDropdown(false);
+    setCardSearchResults([]);
     const item = {
-      name: preset.name,
-      locality: preset.tag || preset.name,
+      name: cleanName,
+      locality: preset.tag || cleanName,
       district: preset.district,
       lat: preset.lat,
       lng: preset.lng,
@@ -446,6 +516,8 @@ export const ArrivalPrediction = () => {
       <div className={`glass-card rounded-3xl p-6 sm:p-8 space-y-6 border transition-all ${
         isCancelled
           ? 'border-rose-300 dark:border-rose-900/60 bg-gradient-to-br from-white via-rose-50/20 to-rose-100/30 dark:from-slate-900 dark:via-rose-950/20 dark:to-slate-900'
+          : isExpired
+          ? 'border-amber-300 dark:border-amber-900/60 bg-gradient-to-br from-white via-amber-50/20 to-amber-100/30 dark:from-slate-900 dark:via-amber-950/20 dark:to-slate-900'
           : 'border-slate-200 dark:border-slate-800 bg-gradient-to-br from-white via-slate-50 to-blue-50/40 dark:from-slate-900 dark:via-slate-900 dark:to-blue-950/30'
       }`}>
         <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 border-b border-slate-200 dark:border-slate-800 pb-4">
@@ -453,21 +525,25 @@ export const ArrivalPrediction = () => {
             <div className={`w-12 h-12 rounded-2xl text-white flex items-center justify-center font-black text-lg shadow-lg ${
               isCancelled
                 ? 'bg-rose-600 shadow-rose-500/25'
+                : isExpired
+                ? 'bg-amber-600 shadow-amber-500/25'
                 : 'bg-blue-600 shadow-blue-500/25'
             }`}>
-              {isCancelled ? <CalendarX className="w-6 h-6" /> : <Ticket className="w-6 h-6" />}
+              {isCancelled ? <CalendarX className="w-6 h-6" /> : isExpired ? <Clock className="w-6 h-6" /> : <Ticket className="w-6 h-6" />}
             </div>
             <div>
               <div className="flex items-center gap-2">
                 <span className={`text-[10px] font-black uppercase tracking-widest px-2.5 py-0.5 rounded-full ${
                   isCancelled
                     ? 'bg-rose-100 dark:bg-rose-900/60 text-rose-800 dark:text-rose-200'
+                    : isExpired
+                    ? 'bg-amber-100 dark:bg-amber-900/60 text-amber-800 dark:text-amber-200'
                     : 'bg-blue-100 dark:bg-blue-900/60 text-blue-800 dark:text-blue-200'
                 }`}>
-                  {isCancelled ? 'Cancelled Slot' : 'Active Consultation Slot'}
+                  {isCancelled ? 'Cancelled Slot' : isExpired ? 'Slot Expired (OPD Closed)' : 'Active Consultation Slot'}
                 </span>
                 <span className="text-xs text-slate-400 font-semibold">
-                  • {isCancelled ? 'Token Released' : 'Token Assigned'}
+                  • {isCancelled ? 'Token Released' : isExpired ? 'Consultation Concluded (8:00 PM)' : 'Token Assigned'}
                 </span>
               </div>
               <h2 className={`text-xl font-black mt-0.5 ${
@@ -479,20 +555,7 @@ export const ArrivalPrediction = () => {
           </div>
 
           <div className="flex items-center gap-2">
-            {!isCancelled ? (
-              <>
-                <span className="px-3 py-1.5 rounded-xl bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 text-xs font-bold flex items-center gap-1.5">
-                  <CheckCircle2 className="w-4 h-4" /> Slot Confirmed
-                </span>
-                <button
-                  type="button"
-                  onClick={() => setIsCancelModalOpen(true)}
-                  className="px-3 py-1.5 rounded-xl text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/40 border border-rose-200 dark:border-rose-900/40 text-xs font-bold transition-all flex items-center gap-1.5 shadow-sm hover:border-rose-300 active:scale-95"
-                >
-                  <XCircle className="w-3.5 h-3.5" /> Cancel Appointment
-                </button>
-              </>
-            ) : (
+            {isCancelled ? (
               <>
                 <span className="px-3 py-1.5 rounded-xl bg-rose-500/10 text-rose-600 dark:text-rose-400 border border-rose-500/20 text-xs font-bold flex items-center gap-1.5">
                   <XCircle className="w-4 h-4" /> Cancelled
@@ -503,6 +566,32 @@ export const ArrivalPrediction = () => {
                   className="px-3.5 py-1.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold transition-all flex items-center gap-1.5 shadow-md shadow-blue-500/20 active:scale-95"
                 >
                   <PlusCircle className="w-3.5 h-3.5" /> Book New Slot
+                </button>
+              </>
+            ) : isExpired ? (
+              <>
+                <span className="px-3 py-1.5 rounded-xl bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20 text-xs font-bold flex items-center gap-1.5">
+                  <Clock className="w-4 h-4" /> OPD Closed
+                </span>
+                <button
+                  type="button"
+                  onClick={() => navigate('/appointment')}
+                  className="px-3.5 py-1.5 rounded-xl bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold transition-all flex items-center gap-1.5 shadow-md shadow-amber-500/20 active:scale-95"
+                >
+                  <Calendar className="w-3.5 h-3.5" /> Book Tomorrow
+                </button>
+              </>
+            ) : (
+              <>
+                <span className="px-3 py-1.5 rounded-xl bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 text-xs font-bold flex items-center gap-1.5">
+                  <CheckCircle2 className="w-4 h-4" /> Slot Confirmed
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setIsCancelModalOpen(true)}
+                  className="px-3 py-1.5 rounded-xl text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/40 border border-rose-200 dark:border-rose-900/40 text-xs font-bold transition-all flex items-center gap-1.5 shadow-sm hover:border-rose-300 active:scale-95"
+                >
+                  <XCircle className="w-3.5 h-3.5" /> Cancel Appointment
                 </button>
               </>
             )}
@@ -537,10 +626,10 @@ export const ArrivalPrediction = () => {
               {getFormattedDate()}
             </p>
             <p className="font-black text-slate-900 dark:text-white text-sm">
-              {user?.timeSlot || user?.appointmentTime || DEMO_PATIENT.appointmentTime}
+              {user?.time_slot || user?.timeSlot || user?.appointmentTime || queueState?.timeSlot || "09:30 AM"}
             </p>
-            <p className={`text-[10px] font-medium ${isCancelled ? 'text-rose-500' : 'text-emerald-500'}`}>
-              {isCancelled ? 'Slot Cancelled' : 'Reporting Window Open'}
+            <p className={`text-[10px] font-medium ${isCancelled ? 'text-rose-500' : isExpired ? 'text-amber-500 font-bold' : 'text-emerald-500'}`}>
+              {isCancelled ? 'Slot Cancelled' : isExpired ? 'Slot Expired (OPD Closed)' : 'Reporting Window Open'}
             </p>
           </div>
 
@@ -578,6 +667,32 @@ export const ArrivalPrediction = () => {
             className="px-4 py-2.5 bg-rose-600 hover:bg-rose-700 text-white rounded-xl font-bold shadow-md shadow-rose-500/20 transition-all flex items-center gap-1.5 shrink-0 active:scale-95"
           >
             <PlusCircle className="w-4 h-4" /> Book New Appointment
+          </button>
+        </div>
+      )}
+
+      {/* Expired Notice Banner if appointment is past 8:00 PM or expired */}
+      {isExpired && !isCancelled && (
+        <div className="p-4 rounded-3xl bg-amber-50 dark:bg-amber-950/40 border border-amber-300 dark:border-amber-800/80 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-xs shadow-sm">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-2xl bg-amber-600 text-white flex items-center justify-center shrink-0 shadow-md shadow-amber-500/20">
+              <Clock className="w-5 h-5" />
+            </div>
+            <div>
+              <p className="font-bold text-amber-900 dark:text-amber-200 text-sm">
+                Hospital OPD Closed for Today (8:00 PM Cutoff)
+              </p>
+              <p className="text-[11px] text-amber-700 dark:text-amber-300 mt-0.5">
+                OPD consultations concluded at 8:00 PM. Unattended slots have expired. You can easily book an appointment for tomorrow.
+              </p>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={() => navigate('/appointment')}
+            className="px-4 py-2.5 bg-amber-600 hover:bg-amber-700 text-white rounded-xl font-bold shadow-md shadow-amber-500/20 transition-all flex items-center gap-1.5 shrink-0 active:scale-95"
+          >
+            <Calendar className="w-4 h-4" /> Book For Tomorrow
           </button>
         </div>
       )}
@@ -898,7 +1013,9 @@ export const ArrivalPrediction = () => {
 
       {/* Main AI Departure Feature Hero Card */}
       <div className={`glass-card rounded-3xl p-6 sm:p-10 space-y-8 border-2 relative overflow-hidden transition-all duration-500 ${
-        shouldLeaveNow && !isDeparted
+        isExpired && !isCancelled
+          ? 'border-amber-500/40 shadow-xl shadow-amber-500/5'
+          : shouldLeaveNow && !isDeparted
           ? 'border-rose-500/60 shadow-2xl shadow-rose-500/10'
           : isDeparted
           ? 'border-emerald-500/60 shadow-2xl shadow-emerald-500/10'
@@ -909,20 +1026,24 @@ export const ArrivalPrediction = () => {
         <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 border-b border-slate-200 dark:border-slate-800 pb-6">
           <div className="flex items-center gap-3">
             <div className={`p-3 text-white rounded-2xl shadow-lg ${
-              shouldLeaveNow && !isDeparted
+              isExpired && !isCancelled
+                ? 'bg-gradient-to-tr from-amber-500 to-amber-700 shadow-amber-500/20'
+                : shouldLeaveNow && !isDeparted
                 ? 'bg-gradient-to-tr from-rose-500 to-amber-600'
                 : isDeparted
                 ? 'bg-gradient-to-tr from-emerald-500 to-teal-600'
                 : 'bg-gradient-to-tr from-cyan-500 to-blue-600'
             }`}>
-              <Navigation className="w-6 h-6 animate-pulse" />
+              {isExpired && !isCancelled ? <Clock className="w-6 h-6" /> : <Navigation className="w-6 h-6 animate-pulse" />}
             </div>
             <div>
-              <span className="text-[10px] uppercase font-bold text-cyan-600 dark:text-cyan-400 tracking-widest">
+              <span className={`text-[10px] uppercase font-bold tracking-widest ${isExpired ? 'text-amber-600 dark:text-amber-400' : 'text-cyan-600 dark:text-cyan-400'}`}>
                 Smart Departure Sync • Shridevi Hospital Tumakuru
               </span>
               <h2 className="text-2xl font-black text-slate-900 dark:text-white mt-0.5">
-                {isDeparted
+                {isExpired && !isCancelled
+                  ? 'Hospital OPD Consultations Concluded for Today'
+                  : isDeparted
                   ? 'Patient En Route (Live Navigation Active)'
                   : shouldLeaveNow
                   ? '🚨 Critical: Leave Home Now!'
@@ -934,17 +1055,19 @@ export const ArrivalPrediction = () => {
           <div className="flex items-center gap-2">
             <button
               onClick={fetchPrediction}
-              disabled={isLoading || !coords}
+              disabled={isLoading || !coords || isExpired}
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-200 transition-colors disabled:opacity-50"
             >
               <RefreshCw className={`w-3.5 h-3.5 ${isLoading ? 'animate-spin' : ''}`} /> Sync Live
             </button>
             <div className={`flex items-center gap-2 px-3.5 py-1.5 rounded-xl border font-bold text-xs ${
-              shouldLeaveNow && !isDeparted
+              isExpired && !isCancelled
+                ? 'bg-amber-50 dark:bg-amber-950/60 border-amber-500/40 text-amber-600 dark:text-amber-400'
+                : shouldLeaveNow && !isDeparted
                 ? 'bg-rose-50 dark:bg-rose-950/60 border-rose-500/40 text-rose-600 dark:text-rose-400'
                 : 'bg-cyan-50 dark:bg-cyan-950/60 border-cyan-500/30 text-cyan-600 dark:text-cyan-400'
             }`}>
-              <Radio className="w-4 h-4 animate-ping" /> {departureData?.trafficCondition || (coords ? 'Live Route Active' : 'Awaiting Location')}
+              <Radio className="w-4 h-4 animate-ping" /> {isExpired && !isCancelled ? 'OPD Closed (8:00 PM)' : (departureData?.trafficCondition || (coords ? 'Live Route Active' : 'Awaiting Location'))}
             </div>
           </div>
         </div>
@@ -955,11 +1078,13 @@ export const ArrivalPrediction = () => {
           {/* Left 6 cols: Large Timer / Alert */}
           <div className="md:col-span-6 space-y-4 text-center md:text-left">
             <p className="text-xs font-semibold uppercase text-slate-500 tracking-wider">
-              {isDeparted ? 'PATIENT IN TRANSIT' : shouldLeaveNow ? 'IMMEDIATE DEPARTURE REQUIRED' : 'DEPARTURE COUNTDOWN TIMER'}
+              {isExpired && !isCancelled ? 'OPD CONSULTATION STATUS' : isDeparted ? 'PATIENT IN TRANSIT' : shouldLeaveNow ? 'IMMEDIATE DEPARTURE REQUIRED' : 'DEPARTURE COUNTDOWN TIMER'}
             </p>
 
             <div className={`p-6 rounded-3xl space-y-2 border shadow-2xl ${
-              shouldLeaveNow && !isDeparted
+              isExpired && !isCancelled
+                ? 'bg-gradient-to-br from-amber-950/40 via-slate-900 to-slate-900 border-amber-500/40 text-white'
+                : shouldLeaveNow && !isDeparted
                 ? 'bg-gradient-to-br from-rose-950/90 to-slate-900 border-rose-500/50 text-white'
                 : isDeparted
                 ? 'bg-gradient-to-br from-emerald-950/90 to-slate-900 border-emerald-500/50 text-white'
@@ -967,23 +1092,25 @@ export const ArrivalPrediction = () => {
             }`}>
               <div className="flex items-center justify-between">
                 <span className="text-[11px] uppercase font-bold tracking-widest text-slate-400">
-                  {isDeparted ? 'Transit Status' : shouldLeaveNow ? 'Emergency Departure' : 'Target Departure Window'}
+                  {isExpired && !isCancelled ? 'Operational Status' : isDeparted ? 'Transit Status' : shouldLeaveNow ? 'Emergency Departure' : 'Target Departure Window'}
                 </span>
                 <span className={`text-[10px] font-black uppercase tracking-wider px-2.5 py-1 rounded-full ${
-                  isDeparted
+                  isExpired && !isCancelled
+                    ? 'bg-amber-500/20 text-amber-400 border border-amber-500/30'
+                    : isDeparted
                     ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
                     : shouldLeaveNow
                     ? 'bg-rose-500/20 text-rose-400 border border-rose-500/30 animate-pulse'
                     : 'bg-cyan-500/20 text-cyan-400 border border-cyan-500/30'
                 }`}>
-                  {isDeparted ? 'En Route' : countdownInfo.badgeText}
+                  {isExpired && !isCancelled ? '⚠️ OPD CLOSED' : isDeparted ? 'En Route' : countdownInfo.badgeText}
                 </span>
               </div>
 
               <div className={`text-5xl sm:text-6xl font-black font-mono tracking-tight py-2 ${
-                shouldLeaveNow && !isDeparted ? 'text-rose-400 animate-pulse' : 'text-white'
+                isExpired && !isCancelled ? 'text-amber-400' : shouldLeaveNow && !isDeparted ? 'text-rose-400 animate-pulse' : 'text-white'
               }`}>
-                {isDeparted ? 'EN ROUTE' : countdownInfo.timeFormatted}
+                {isExpired && !isCancelled ? 'CLOSED' : isDeparted ? 'EN ROUTE' : countdownInfo.timeFormatted}
               </div>
 
               <p className="text-xs text-slate-300">

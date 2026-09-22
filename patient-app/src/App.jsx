@@ -31,6 +31,8 @@ const Layout = ({ children }) => {
     '/dashboard',
     '/queue-status',
     '/arrival-prediction',
+    '/appointment',
+    '/book-appointment',
     '/notifications',
     '/profile'
   ].includes(location.pathname);

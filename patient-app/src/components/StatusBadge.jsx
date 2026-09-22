@@ -7,7 +7,9 @@ export const StatusBadge = ({ status = 'Waiting', size = 'md' }) => {
     Waiting: { bg: 'bg-blue-500/10 text-blue-600 dark:text-blue-400 border-blue-500/30', dot: 'bg-blue-500' },
     Delayed: { bg: 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/30', dot: 'bg-amber-500' },
     Emergency: { bg: 'bg-red-500/10 text-red-600 dark:text-red-400 border-red-500/30', dot: 'bg-red-500 animate-pulse' },
-    Completed: { bg: 'bg-slate-500/10 text-slate-600 dark:text-slate-400 border-slate-500/30', dot: 'bg-slate-400' }
+    Completed: { bg: 'bg-slate-500/10 text-slate-600 dark:text-slate-400 border-slate-500/30', dot: 'bg-slate-400' },
+    Expired: { bg: 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/30', dot: 'bg-amber-500' },
+    Closed: { bg: 'bg-slate-500/10 text-slate-600 dark:text-slate-400 border-slate-500/30', dot: 'bg-slate-400' }
   };
 
   const config = statusConfig[status] || statusConfig.Waiting;

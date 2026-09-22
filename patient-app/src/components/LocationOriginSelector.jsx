@@ -74,6 +74,17 @@ export const LocationOriginSelector = ({
     }
   }, [isOpen, currentLocation]);
 
+  // Close dropdown on click outside
+  useEffect(() => {
+    const handleClickOutside = (e) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(e.target)) {
+        setShowDropdown(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
   const handleRedetectGPS = () => {
     if (!('geolocation' in navigator)) {
       alert("Geolocation is not supported by your browser.");

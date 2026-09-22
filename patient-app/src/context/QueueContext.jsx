@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import { DEMO_PATIENT } from '../utils/constants';
 import { queueService } from '../services/queueService';
+import { patientService } from '../services/patientService';
 import { useAuth } from './AuthContext';
 
 // Shares the live queue model and demo controls between queue-related screens.
@@ -11,16 +12,17 @@ export const QueueProvider = ({ children }) => {
   const { user, setUser } = useAuth();
 
   const [queueState, setQueueState] = useState(() => {
-    const hasToken = Boolean(user && user.tokenNumber);
+    const activeTok = user?.tokenNumber || (user?.appointment_id ? `OPD-${String(user.appointment_id).padStart(3, '0')}` : null);
+    const hasToken = Boolean(activeTok);
     return {
       hasActiveToken: hasToken,
-      tokenNumber: user?.tokenNumber || null,
-      numericToken: user?.numericToken || null,
+      tokenNumber: activeTok,
+      numericToken: user?.numericToken || (user?.appointment_id ? Number(user.appointment_id) : null),
       currentToken: user?.currentToken || null,
       patientsAhead: user?.patientsAhead || 0,
       estimatedWaitMinutes: user?.estimatedWaitMinutes || 0,
       doctor: user?.doctor || "General Medicine • OPD Hub",
-      doctorId: user?.doctorId ? Number(String(user.doctorId).replace(/\D/g, '')) : 3,
+      doctorId: user?.doctorId ? Number(String(user.doctorId).replace(/\D/g, '')) : (user?.doctor_id || 3),
       department: user?.department || "General Medicine",
       roomNo: user?.roomNo || "Room 204",
       emergencyCount: user?.emergencyInsertedCount || 0,
@@ -41,10 +43,8 @@ export const QueueProvider = ({ children }) => {
           if (res) {
             setQueueState(prev => ({
               ...prev,
-              doctor: res.doctor || prev.doctor,
-              department: res.department || prev.department,
-              roomNo: res.roomNo || prev.roomNo,
-              currentToken: res.servingToken || null,
+              currentToken: res.servingToken || prev.currentToken,
+              doctor: res.doctorName || prev.doctor,
               lastUpdated: new Date().toLocaleTimeString()
             }));
           }
@@ -61,7 +61,7 @@ export const QueueProvider = ({ children }) => {
           hasActiveToken: true,
           tokenNumber: data.tokenNumber || prev.tokenNumber,
           numericToken: data.numericToken ?? prev.numericToken,
-          currentToken: data.currentToken ?? prev.currentToken,
+          currentToken: data.currentToken || prev.currentToken,
           patientsAhead: data.patientsAhead ?? prev.patientsAhead,
           estimatedWaitMinutes: data.estimatedWaitMinutes ?? prev.estimatedWaitMinutes,
           doctor: data.doctor || prev.doctor,
@@ -93,24 +93,86 @@ export const QueueProvider = ({ children }) => {
         roomNo: user.roomNo || prev.roomNo,
       }));
       fetchQueueData(user.tokenNumber);
-    } else if (user && !user.tokenNumber) {
-      // User is logged in but has no active token in state - check backend /appointments/me
+    } else if (user) {
+      // User is logged in but tokenNumber is not in memory - check backend /appointments/me
       const checkBackend = async () => {
         try {
-          const myAppts = await queueService.getDoctorQueueStream(3);
+          const myAppts = await patientService.getMyAppointments(user.phone);
+          if (Array.isArray(myAppts) && myAppts.length > 0) {
+            // Find most recent active appointment (pending or serving)
+            const active = myAppts.find(a => a.status === 'pending' || a.status === 'serving');
+            if (active) {
+              const allocatedToken = active.tokenNumber || (active.numericToken ? `OPD-${String(active.numericToken).padStart(3, '0')}` : `OPD-${String(active.id).padStart(3, '0')}`);
+              setQueueState(prev => ({
+                ...prev,
+                hasActiveToken: true,
+                isExpired: false,
+                status: active.status,
+                tokenNumber: allocatedToken,
+                numericToken: active.numericToken || active.id,
+                patientsAhead: active.patientsAhead ?? prev.patientsAhead,
+                estimatedWaitMinutes: active.estimatedWaitMinutes ?? prev.estimatedWaitMinutes,
+                doctor: active.doctor || prev.doctor,
+                doctorId: active.doctor_id || prev.doctorId,
+                department: active.department || prev.department,
+                roomNo: active.roomNo || prev.roomNo,
+                timeSlot: active.time_slot,
+                appointmentDate: active.appointment_date
+              }));
+              fetchQueueData(allocatedToken);
+              return;
+            }
+
+            // Check if there is an expired or completed slot
+            const recent = myAppts[0];
+            if (recent && (recent.status === 'expired' || recent.status === 'completed')) {
+              const allocatedToken = recent.tokenNumber || (recent.numericToken ? `OPD-${String(recent.numericToken).padStart(3, '0')}` : `OPD-${String(recent.id).padStart(3, '0')}`);
+              setQueueState(prev => ({
+                ...prev,
+                hasActiveToken: true,
+                isExpired: recent.status === 'expired',
+                status: recent.status,
+                tokenNumber: allocatedToken,
+                numericToken: recent.numericToken || recent.id,
+                currentToken: recent.status === 'expired' ? "OPD-CLOSED" : allocatedToken,
+                patientsAhead: 0,
+                estimatedWaitMinutes: 0,
+                doctor: recent.doctor || prev.doctor,
+                doctorId: recent.doctor_id || prev.doctorId,
+                department: recent.department || prev.department,
+                roomNo: recent.roomNo || prev.roomNo,
+                timeSlot: recent.time_slot,
+                appointmentDate: recent.appointment_date
+              }));
+              return;
+            }
+          }
+          // No active appointment found
+          const docStream = await queueService.getDoctorQueueStream(3);
           setQueueState(prev => ({
             ...prev,
             hasActiveToken: false,
+            isExpired: false,
+            status: 'none',
             tokenNumber: null,
             numericToken: null,
-            currentToken: myAppts?.servingToken || null,
+            currentToken: docStream?.servingToken || null,
             patientsAhead: 0,
             estimatedWaitMinutes: 0,
             doctor: "General Medicine • OPD Hub",
             department: "General Medicine",
             roomNo: "Room 204"
           }));
-        } catch {}
+        } catch {
+          setQueueState(prev => ({
+            ...prev,
+            hasActiveToken: false,
+            isExpired: false,
+            status: 'none',
+            tokenNumber: null,
+            numericToken: null
+          }));
+        }
       };
       checkBackend();
     } else {

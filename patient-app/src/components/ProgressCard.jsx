@@ -10,16 +10,28 @@ export const ProgressCard = ({
   numericToken = null,
   patientsAhead = 0,
   estimatedWaitMinutes = 0,
-  emergencyCount = 0
+  emergencyCount = 0,
+  status = "pending",
+  isExpired = false
 }) => {
   if (!tokenNumber) return null;
+
+  const now = new Date();
+  const isPastOpdHours = now.getHours() >= 20 || now.getHours() < 8;
+  const isSlotExpired = isExpired || status === 'expired' || currentToken === 'OPD-CLOSED';
+
+  const badgeStatus = isSlotExpired
+    ? 'Expired'
+    : (isPastOpdHours
+      ? 'Closed'
+      : (status === 'completed' ? 'Completed' : (patientsAhead === 0 ? 'Serving' : 'Waiting')));
 
   // Calculate progress percentage safely
   const currNum = typeof currentToken === 'number' 
     ? currentToken 
     : (parseInt(String(currentToken || '1').replace(/\D/g, '')) || 1);
   const total = numericToken || currNum || 1;
-  const progressPercent = Math.min(100, Math.max(0, Math.round((currNum / total) * 100)));
+  const progressPercent = isSlotExpired ? 100 : Math.min(100, Math.max(0, Math.round((currNum / total) * 100)));
 
   // Circular progress calculations
   const radius = 45;
@@ -36,7 +48,7 @@ export const ProgressCard = ({
           <p className="text-xs font-semibold text-blue-600 dark:text-blue-400 uppercase tracking-widest">Live Radar</p>
           <h3 className="text-2xl font-black text-slate-900 dark:text-white mt-1">Queue Progression</h3>
         </div>
-        <StatusBadge status={patientsAhead === 0 ? "Serving" : "Waiting"} />
+        <StatusBadge status={badgeStatus} />
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-8 items-center">

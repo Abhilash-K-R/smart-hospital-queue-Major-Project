@@ -69,18 +69,22 @@ def run_suite():
     print("\n[5] Testing Lifecycle Notification Stages 1 to 5...")
     
     # Stage 1: Book appointment -> triggers Booking Confirmed notification
+    from datetime import date, timedelta
+    tomorrow_str = (date.today() + timedelta(days=1)).strftime("%Y-%m-%d")
     book_res = requests.post(f"{BASE_URL}/patients/book", json={
         "doctor": "Dr. Rajeswari R.",
         "doctor_id": 3,
         "department": "General Medicine",
+        "date": tomorrow_str,
         "timeSlot": "11:00 AM",
         "patient_name": test_name,
         "phone": test_phone,
         "symptoms": "Mild seasonal fever"
     }, headers=headers)
     assert book_res.status_code == 200, f"Booking failed: {book_res.text}"
-    appt_id = book_res.json()["appointment_id"]
-    print(f"[PASS] Stage 1: Appointment booked (Appt ID: {appt_id}) and Booking Confirmed notification triggered")
+    data = book_res.json()
+    appt_id = data.get("id") or data.get("appointment_id")
+    print(f"[PASS] Stage 1: Appointment booked for {tomorrow_str} (Appt ID: {appt_id}) and Booking Confirmed notification triggered")
 
     # Stage 4: Trigger No-Show Warning
     absent_res = requests.post(f"{BASE_URL}/staff/queue/mark-absent/{appt_id}")
