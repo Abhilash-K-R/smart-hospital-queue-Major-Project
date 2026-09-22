@@ -11,7 +11,11 @@ Owner: Anjanadri (Phase 1)
 from sqlmodel import create_engine
 import os
 import socket
-import dns.resolver
+try:
+    import dns.resolver
+    HAS_DNS_RESOLVER = True
+except ImportError:
+    HAS_DNS_RESOLVER = False
 
 # Robust DNS fallback for serverless DB host resolution when local ISP DNS fails
 _orig_getaddrinfo = socket.getaddrinfo
@@ -20,7 +24,7 @@ def _fallback_getaddrinfo(host, port, family=0, type=0, proto=0, flags=0):
     try:
         return _orig_getaddrinfo(host, port, family, type, proto, flags)
     except socket.gaierror:
-        if isinstance(host, str) and "neon.tech" in host:
+        if HAS_DNS_RESOLVER and isinstance(host, str) and "neon.tech" in host:
             try:
                 resolver = dns.resolver.Resolver()
                 resolver.nameservers = ['8.8.8.8', '1.1.1.1']
