@@ -193,7 +193,7 @@ def read_root():
     return {
         "status": "alive",
         "db_configured": bool(engine),
-        "version": "v1.5-booking-fixed-perfect",
+        "version": "v1.6-timezone-fixed-live",
     }
 
 
@@ -463,7 +463,7 @@ def create_appointment(
         new_appointment = Appointment(
             patient_id=patient_id,
             doctor_id=doctor.id,
-            booked_time=now_ist.replace(tzinfo=None),
+            booked_time=datetime.now(timezone.utc),
             status="pending",
             queue_position=existing_count + 1,
             time_slot=chosen_slot,
@@ -1427,7 +1427,7 @@ def frontend_register(request: FrontendRegisterRequest):
         appointment = Appointment(
             patient_id=patient.id,
             doctor_id=doc_id,
-            booked_time=now_ist.replace(tzinfo=None),
+            booked_time=datetime.now(timezone.utc),
             status="pending",
             queue_position=existing_count + 1,
             time_slot=chosen_slot,
@@ -1627,7 +1627,7 @@ def book_patient_appointment(
             appointment = Appointment(
                 patient_id=patient.id,
                 doctor_id=doctor.id,
-                booked_time=now_ist.replace(tzinfo=None),
+                booked_time=datetime.now(timezone.utc),
                 status="pending",
                 queue_position=existing_count + 1,
                 time_slot=chosen_slot,
@@ -3182,7 +3182,7 @@ def register_walkin_patient(req: StaffWalkInRegisterRequest):
         appointment = Appointment(
             patient_id=patient.id,
             doctor_id=doc_id,
-            booked_time=now_ist.replace(tzinfo=None),
+            booked_time=datetime.now(timezone.utc),
             status="pending",
             queue_position=1,
             time_slot=chosen_slot,
