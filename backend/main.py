@@ -193,7 +193,7 @@ def read_root():
     return {
         "status": "alive",
         "db_configured": bool(engine),
-        "version": "v1.3-booking-fix-live",
+        "version": "v1.4-cors-and-booking-live",
     }
 
 
@@ -1497,22 +1497,23 @@ def book_patient_appointment(
     Writes directly to Neon PostgreSQL appointment table so it immediately
     appears in staff-dashboard live queue.
     """
-    now_ist = datetime.now(IST)
-    today_ist = now_ist.strftime("%Y-%m-%d")
-    chosen_date = req.date or today_ist
-    chosen_slot = req.time_slot or req.timeSlot or "09:30 AM"
+    try:
+        now_ist = datetime.now(IST)
+        today_ist = now_ist.strftime("%Y-%m-%d")
+        chosen_date = req.date or today_ist
+        chosen_slot = req.time_slot or req.timeSlot or "09:30 AM"
 
-    # Reject past slots if booking for today
-    if chosen_date == today_ist:
-        slot_mins = parse_slot_time_to_minutes(chosen_slot)
-        curr_mins = now_ist.hour * 60 + now_ist.minute
-        if slot_mins is not None and slot_mins <= curr_mins:
-            raise HTTPException(
-                status_code=400,
-                detail="Selected time slot has already passed."
-            )
+        # Reject past slots if booking for today
+        if chosen_date == today_ist:
+            slot_mins = parse_slot_time_to_minutes(chosen_slot)
+            curr_mins = now_ist.hour * 60 + now_ist.minute
+            if slot_mins is not None and slot_mins <= curr_mins:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Selected time slot has already passed."
+                )
 
-    with Session(engine) as session:
+        with Session(engine) as session:
         # Determine Patient
         patient = None
         auth_header = request.headers.get("Authorization")
@@ -1722,6 +1723,12 @@ def book_patient_appointment(
             is_dependent=is_dep,
             patient=patient_payload,
         )
+    except HTTPException:
+        raise
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Booking failed: {str(e)}")
 
 
 
