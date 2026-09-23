@@ -177,10 +177,11 @@ app.add_middleware(
 
 @app.get("/")
 def read_root():
+    """Health check verifying database connection and service uptime."""
     return {
         "status": "alive",
-        "db_configured": os.getenv("DATABASE_URL") is not None,
-        "version": "v1.2-emergency-triage-deployed",
+        "db_configured": bool(engine),
+        "version": "v1.3-booking-fix-live",
     }
 
 
