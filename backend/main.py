@@ -193,7 +193,7 @@ def read_root():
     return {
         "status": "alive",
         "db_configured": bool(engine),
-        "version": "v1.4-cors-and-booking-live",
+        "version": "v1.5-booking-fixed-perfect",
     }
 
 
@@ -1514,215 +1514,213 @@ def book_patient_appointment(
                 )
 
         with Session(engine) as session:
-        # Determine Patient
-        patient = None
-        auth_header = request.headers.get("Authorization")
-        if auth_header and auth_header.startswith("Bearer "):
-            raw_token = auth_header.split(" ")[1]
-            try:
-                from auth import verify_access_token
-                payload = verify_access_token(raw_token)
-                if payload and "sub" in payload:
-                    patient = session.get(Patient, int(payload["sub"]))
-            except Exception as e:
-                print(f"[Auth] Token decode error in book_patient_appointment: {e}")
+            # Determine Patient
+            patient = None
+            auth_header = request.headers.get("Authorization")
+            if auth_header and auth_header.startswith("Bearer "):
+                raw_token = auth_header.split(" ")[1]
+                try:
+                    from auth import verify_access_token
+                    payload = verify_access_token(raw_token)
+                    if payload and "sub" in payload:
+                        patient = session.get(Patient, int(payload["sub"]))
+                except Exception as e:
+                    print(f"[Auth] Token decode error in book_patient_appointment: {e}")
 
+            if not patient and req.email:
+                patient = session.exec(select(Patient).where(Patient.email == req.email)).first()
 
-        if not patient and req.email:
-            patient = session.exec(select(Patient).where(Patient.email == req.email)).first()
+            if not patient and req.phone:
+                patient = session.exec(select(Patient).where(Patient.phone == req.phone)).first()
 
-        if not patient and req.phone:
-            patient = session.exec(select(Patient).where(Patient.phone == req.phone)).first()
+            if not patient and req.patient_id:
+                try:
+                    raw_pid = req.patient_id
+                    pid_int = raw_pid if isinstance(raw_pid, int) else (int(re.findall(r'\d+', str(raw_pid))[0]) if re.findall(r'\d+', str(raw_pid)) else None)
+                    if pid_int:
+                        patient = session.get(Patient, pid_int)
+                except Exception:
+                    pass
 
-        if not patient and req.patient_id:
-            try:
-                raw_pid = req.patient_id
-                pid_int = raw_pid if isinstance(raw_pid, int) else (int(re.findall(r'\d+', str(raw_pid))[0]) if re.findall(r'\d+', str(raw_pid)) else None)
-                if pid_int:
-                    patient = session.get(Patient, pid_int)
-            except Exception:
-                pass
-
-        if not patient:
-            # Fall back to first patient in database or create Laxuman G
-            patient = session.exec(select(Patient)).first()
             if not patient:
-                patient = Patient(
-                    name=req.patient_name or "Laxuman G",
-                    phone=req.phone or "9876543210",
-                    email=req.email or "laxuman.patient@mediflow.ai",
-                    password_hash=hash_password("Patient@123"),
-                )
-                session.add(patient)
-                session.commit()
-                session.refresh(patient)
+                # Fall back to first patient in database or create Laxuman G
+                patient = session.exec(select(Patient)).first()
+                if not patient:
+                    patient = Patient(
+                        name=req.patient_name or "Laxuman G",
+                        phone=req.phone or "9876543210",
+                        email=req.email or "laxuman.patient@mediflow.ai",
+                        password_hash=hash_password("Patient@123"),
+                    )
+                    session.add(patient)
+                    session.commit()
+                    session.refresh(patient)
 
-        # Resolve Doctor
-        doctor = resolve_doctor_from_request(session, req.doctor_id, req.doctor, req.department)
-        if not doctor:
-            doctor = session.exec(select(Doctor)).first()
+            # Resolve Doctor
+            doctor = resolve_doctor_from_request(session, req.doctor_id, req.doctor, req.department)
             if not doctor:
-                raise HTTPException(status_code=404, detail="No doctors available in hospital database")
+                doctor = session.exec(select(Doctor)).first()
+                if not doctor:
+                    raise HTTPException(status_code=404, detail="No doctors available in hospital database")
 
-        dept = session.get(Department, doctor.department_id)
-        dept_name = dept.name if dept else "General Medicine"
-        meta = DOCTOR_METADATA.get(doctor.name, {})
+            dept = session.get(Department, doctor.department_id)
+            dept_name = dept.name if dept else "General Medicine"
+            meta = DOCTOR_METADATA.get(doctor.name, {})
 
-        # Extract attendee details
-        is_dep = bool(req.is_dependent)
-        beneficiary_name = req.patient_name or req.beneficiary_name or (patient.name if not is_dep else None)
-        try:
-            beneficiary_age = int(req.patient_age or req.beneficiary_age or 35)
-        except (ValueError, TypeError):
-            beneficiary_age = 35
-        beneficiary_gender = req.patient_gender or req.beneficiary_gender or "Male"
-        contact_phone = req.contact_phone or patient.phone
+            # Extract attendee details
+            is_dep = bool(req.is_dependent)
+            beneficiary_name = req.patient_name or req.beneficiary_name or (patient.name if not is_dep else None)
+            try:
+                beneficiary_age = int(req.patient_age or req.beneficiary_age or 35)
+            except (ValueError, TypeError):
+                beneficiary_age = 35
+            beneficiary_gender = req.patient_gender or req.beneficiary_gender or "Male"
+            contact_phone = req.contact_phone or patient.phone
 
-        # Idempotency / Duplicate Booking Guard
-        if is_dep:
-            dep_clean_name = (beneficiary_name or "").strip().lower()
-            dep_clean_phone = (contact_phone or "").strip()
-            existing_active = session.exec(
-                select(Appointment).where(
-                    Appointment.patient_id == patient.id,
-                    Appointment.doctor_id == doctor.id,
-                    Appointment.appointment_date == chosen_date,
-                    Appointment.is_dependent == True,
-                    func.lower(Appointment.beneficiary_name) == dep_clean_name,
-                    Appointment.contact_phone == dep_clean_phone,
-                    Appointment.status.in_(["pending", "serving"])
-                )
-            ).first()
-            if existing_active:
-                token_str = f"OPD-{existing_active.id:03d}"
-                raise HTTPException(
-                    status_code=status.HTTP_409_CONFLICT,
-                    detail=f"An active appointment ({token_str}) already exists for {beneficiary_name} with {doctor.name} on {chosen_date}."
-                )
-        else:
-            existing_active = session.exec(
-                select(Appointment).where(
-                    Appointment.patient_id == patient.id,
-                    Appointment.doctor_id == doctor.id,
-                    Appointment.appointment_date == chosen_date,
-                    Appointment.is_dependent == False,
-                    Appointment.status.in_(["pending", "serving"])
-                )
-            ).first()
-            if existing_active:
-                token_str = f"OPD-{existing_active.id:03d}"
-                raise HTTPException(
-                    status_code=status.HTTP_409_CONFLICT,
-                    detail=f"You already have an active personal appointment ({token_str}) booked with {doctor.name} for {chosen_date}."
-                )
+            # Idempotency / Duplicate Booking Guard
+            if is_dep:
+                dep_clean_name = (beneficiary_name or "").strip().lower()
+                dep_clean_phone = (contact_phone or "").strip()
+                existing_active = session.exec(
+                    select(Appointment).where(
+                        Appointment.patient_id == patient.id,
+                        Appointment.doctor_id == doctor.id,
+                        Appointment.appointment_date == chosen_date,
+                        Appointment.is_dependent == True,
+                        func.lower(Appointment.beneficiary_name) == dep_clean_name,
+                        Appointment.contact_phone == dep_clean_phone,
+                        Appointment.status.in_(["pending", "serving"])
+                    )
+                ).first()
+                if existing_active:
+                    token_str = f"OPD-{existing_active.id:03d}"
+                    raise HTTPException(
+                        status_code=status.HTTP_409_CONFLICT,
+                        detail=f"An active appointment ({token_str}) already exists for {beneficiary_name} with {doctor.name} on {chosen_date}."
+                    )
+            else:
+                existing_active = session.exec(
+                    select(Appointment).where(
+                        Appointment.patient_id == patient.id,
+                        Appointment.doctor_id == doctor.id,
+                        Appointment.appointment_date == chosen_date,
+                        Appointment.is_dependent == False,
+                        Appointment.status.in_(["pending", "serving"])
+                    )
+                ).first()
+                if existing_active:
+                    token_str = f"OPD-{existing_active.id:03d}"
+                    raise HTTPException(
+                        status_code=status.HTTP_409_CONFLICT,
+                        detail=f"You already have an active personal appointment ({token_str}) booked with {doctor.name} for {chosen_date}."
+                    )
 
-        existing_count = len(
-            session.exec(
-                select(Appointment.id).where(
-                    Appointment.doctor_id == doctor.id,
-                    Appointment.status == "pending",
-                )
-            ).all()
-        )
+            existing_count = len(
+                session.exec(
+                    select(Appointment.id).where(
+                        Appointment.doctor_id == doctor.id,
+                        Appointment.status == "pending",
+                    )
+                ).all()
+            )
 
+            appointment = Appointment(
+                patient_id=patient.id,
+                doctor_id=doctor.id,
+                booked_time=now_ist.replace(tzinfo=None),
+                status="pending",
+                queue_position=existing_count + 1,
+                time_slot=chosen_slot,
+                appointment_date=chosen_date,
+                beneficiary_name=beneficiary_name,
+                beneficiary_age=beneficiary_age,
+                beneficiary_gender=beneficiary_gender,
+                contact_phone=contact_phone,
+                is_dependent=is_dep,
+            )
+            session.add(appointment)
+            session.commit()
+            session.refresh(appointment)
 
-        appointment = Appointment(
-            patient_id=patient.id,
-            doctor_id=doctor.id,
-            booked_time=now_ist.replace(tzinfo=None),
-            status="pending",
-            queue_position=existing_count + 1,
-            time_slot=chosen_slot,
-            appointment_date=chosen_date,
-            beneficiary_name=beneficiary_name,
-            beneficiary_age=beneficiary_age,
-            beneficiary_gender=beneficiary_gender,
-            contact_phone=contact_phone,
-            is_dependent=is_dep,
-        )
-        session.add(appointment)
-        session.commit()
-        session.refresh(appointment)
+            # Strict accurate calculation of patients ahead in line based on slot chronological sorting
+            active_doctor_queue = get_sorted_doctor_appointments(session, doctor_id=doctor.id, appointment_date=chosen_date)
+            try:
+                target_idx = next(i for i, a in enumerate(active_doctor_queue) if a.id == appointment.id)
+                patients_ahead = sum(1 for a in active_doctor_queue[:target_idx] if a.status == "pending")
+                calculated_pos = target_idx + 1
+            except StopIteration:
+                patients_ahead = 0
+                calculated_pos = 1
 
-        # Strict accurate calculation of patients ahead in line based on slot chronological sorting
-        active_doctor_queue = get_sorted_doctor_appointments(session, doctor_id=doctor.id, appointment_date=chosen_date)
-        try:
-            target_idx = next(i for i, a in enumerate(active_doctor_queue) if a.id == appointment.id)
-            patients_ahead = sum(1 for a in active_doctor_queue[:target_idx] if a.status == "pending")
-            calculated_pos = target_idx + 1
-        except StopIteration:
-            patients_ahead = 0
-            calculated_pos = 1
+            appointment.queue_position = calculated_pos
+            session.add(appointment)
+            session.commit()
 
-        appointment.queue_position = calculated_pos
-        session.add(appointment)
-        session.commit()
+            display_attendee = beneficiary_name or patient.name
+            # Stage 1 Lifecycle Trigger: Booking Confirmed Notification
+            create_patient_notification(
+                session=session,
+                patient_id=patient.id,
+                notif_type="booking_confirmed",
+                title="✅ Appointment Confirmed",
+                message=f"Appointment Confirmed for {display_attendee} ({chosen_slot}) with {doctor.name}. You have {patients_ahead} patients ahead of you.",
+                severity="success"
+            )
 
-        display_attendee = beneficiary_name or patient.name
-        # Stage 1 Lifecycle Trigger: Booking Confirmed Notification
-        create_patient_notification(
-            session=session,
-            patient_id=patient.id,
-            notif_type="booking_confirmed",
-            title="✅ Appointment Confirmed",
-            message=f"Appointment Confirmed for {display_attendee} ({chosen_slot}) with {doctor.name}. You have {patients_ahead} patients ahead of you.",
-            severity="success"
-        )
+            token_num = appointment.id
+            token_str = f"OPD-{token_num:03d}"
+            est_wait = round(patients_ahead * doctor.avg_consult_minutes * 0.85, 1)
 
-        token_num = appointment.id
-        token_str = f"OPD-{token_num:03d}"
-        est_wait = round(patients_ahead * doctor.avg_consult_minutes * 0.85, 1)
+            patient_payload = {
+                "id": f"P-{patient.id:05d}",
+                "name": patient.name,
+                "phone": patient.phone,
+                "email": patient.email,
+                "patient_name": display_attendee,
+                "patient_age": beneficiary_age,
+                "patient_gender": beneficiary_gender,
+                "contact_phone": contact_phone,
+                "is_dependent": is_dep,
+                "appointment_id": appointment.id,
+                "tokenNumber": token_str,
+                "numericToken": token_num,
+                "currentToken": f"OPD-{max(1, token_num - patients_ahead):03d}",
+                "patientsAhead": patients_ahead,
+                "estimatedWaitMinutes": est_wait,
+                "doctor": doctor.name,
+                "doctorId": f"doc-{doctor.id}",
+                "department": dept_name,
+                "roomNo": meta.get("room", "Room 204"),
+                "appointmentTime": chosen_slot,
+                "time_slot": chosen_slot,
+                "timeSlot": chosen_slot,
+                "appointmentDate": chosen_date,
+                "symptoms": req.symptoms or "Routine consultation",
+            }
 
-        patient_payload = {
-            "id": f"P-{patient.id:05d}",
-            "name": patient.name,
-            "phone": patient.phone,
-            "email": patient.email,
-            "patient_name": display_attendee,
-            "patient_age": beneficiary_age,
-            "patient_gender": beneficiary_gender,
-            "contact_phone": contact_phone,
-            "is_dependent": is_dep,
-            "appointment_id": appointment.id,
-            "tokenNumber": token_str,
-            "numericToken": token_num,
-            "currentToken": f"OPD-{max(1, token_num - patients_ahead):03d}",
-            "patientsAhead": patients_ahead,
-            "estimatedWaitMinutes": est_wait,
-            "doctor": doctor.name,
-            "doctorId": f"doc-{doctor.id}",
-            "department": dept_name,
-            "roomNo": meta.get("room", "Room 204"),
-            "appointmentTime": chosen_slot,
-            "time_slot": chosen_slot,
-            "timeSlot": chosen_slot,
-            "appointmentDate": chosen_date,
-            "symptoms": req.symptoms or "Routine consultation",
-        }
-
-        return AppointmentBookResponse(
-            success=True,
-            message="Appointment successfully booked and token issued!",
-            appointment_id=appointment.id,
-            tokenNumber=token_str,
-            numericToken=token_num,
-            currentToken=f"OPD-{max(1, token_num - patients_ahead):03d}",
-            patientsAhead=patients_ahead,
-            estimatedWaitMinutes=est_wait,
-            doctor=doctor.name,
-            department=dept_name,
-            roomNo=meta.get("room", "Room 204"),
-            booked_time=now_ist.strftime("%I:%M %p"),
-            time_slot=chosen_slot,
-            timeSlot=chosen_slot,
-            appointment_date=chosen_date,
-            patient_name=display_attendee,
-            patient_age=beneficiary_age,
-            patient_gender=beneficiary_gender,
-            contact_phone=contact_phone,
-            is_dependent=is_dep,
-            patient=patient_payload,
-        )
+            return AppointmentBookResponse(
+                success=True,
+                message="Appointment successfully booked and token issued!",
+                appointment_id=appointment.id,
+                tokenNumber=token_str,
+                numericToken=token_num,
+                currentToken=f"OPD-{max(1, token_num - patients_ahead):03d}",
+                patientsAhead=patients_ahead,
+                estimatedWaitMinutes=est_wait,
+                doctor=doctor.name,
+                department=dept_name,
+                roomNo=meta.get("room", "Room 204"),
+                booked_time=now_ist.strftime("%I:%M %p"),
+                time_slot=chosen_slot,
+                timeSlot=chosen_slot,
+                appointment_date=chosen_date,
+                patient_name=display_attendee,
+                patient_age=beneficiary_age,
+                patient_gender=beneficiary_gender,
+                contact_phone=contact_phone,
+                is_dependent=is_dep,
+                patient=patient_payload,
+            )
     except HTTPException:
         raise
     except Exception as e:
