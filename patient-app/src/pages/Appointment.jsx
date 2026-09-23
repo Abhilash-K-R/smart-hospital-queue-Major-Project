@@ -379,20 +379,29 @@ export const Appointment = () => {
       console.error("Booking error:", err);
       const status = err.response?.status;
       const detail = err.response?.data?.detail;
-      let errMsg = "Failed to book appointment. Please try again.";
+      let errMsg = "Failed to book appointment. Please check details and try again.";
 
       if (Array.isArray(detail)) {
         errMsg = detail.map(d => `${d.loc?.slice(-1)[0] || 'Field'}: ${d.msg}`).join(", ");
       } else if (typeof detail === 'string') {
         errMsg = detail;
       } else if (err.message) {
-        errMsg = err.message;
+        if (err.message.toLowerCase().includes("network error")) {
+          errMsg = "Unable to connect to hospital server. Please verify network connection or try again.";
+        } else {
+          errMsg = err.message;
+        }
       }
 
       if (status === 401 || errMsg.toLowerCase().includes("not authenticated") || errMsg.toLowerCase().includes("invalid or expired token")) {
         setBookingError({
           type: "auth",
           message: "Your session has expired or requires authentication. Please sign in to confirm your OPD appointment."
+        });
+      } else if (status === 409 || errMsg.toLowerCase().includes("already exists") || errMsg.toLowerCase().includes("already have an active")) {
+        setBookingError({
+          type: "warning",
+          message: errMsg
         });
       } else {
         setBookingError({

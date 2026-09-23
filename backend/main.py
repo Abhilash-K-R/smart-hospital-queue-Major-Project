@@ -310,7 +310,6 @@ def update_symptom_mapping(mapping_id: int, request: SymptomMappingUpdateRequest
 # ---------------------------------------------------------------------
 
 @app.post("/appointments", response_model=AppointmentResponse)
-@app.post("/patients/book", response_model=AppointmentResponse)
 def create_appointment(
     request: AppointmentCreateRequest,
     current_user: Optional[dict] = Depends(get_optional_current_user),
@@ -1518,14 +1517,26 @@ def book_patient_appointment(
         if not patient and req.email:
             patient = session.exec(select(Patient).where(Patient.email == req.email)).first()
 
+        if not patient and req.phone:
+            patient = session.exec(select(Patient).where(Patient.phone == req.phone)).first()
+
+        if not patient and req.patient_id:
+            try:
+                raw_pid = req.patient_id
+                pid_int = raw_pid if isinstance(raw_pid, int) else (int(re.findall(r'\d+', str(raw_pid))[0]) if re.findall(r'\d+', str(raw_pid)) else None)
+                if pid_int:
+                    patient = session.get(Patient, pid_int)
+            except Exception:
+                pass
+
         if not patient:
-            # Look for default patient or create Laxuman G
-            patient = session.exec(select(Patient).where(Patient.email == "laxuman.patient@mediflow.ai")).first()
+            # Fall back to first patient in database or create Laxuman G
+            patient = session.exec(select(Patient)).first()
             if not patient:
                 patient = Patient(
                     name=req.patient_name or "Laxuman G",
                     phone=req.phone or "9876543210",
-                    email="laxuman.patient@mediflow.ai",
+                    email=req.email or "laxuman.patient@mediflow.ai",
                     password_hash=hash_password("Patient@123"),
                 )
                 session.add(patient)
@@ -1546,7 +1557,10 @@ def book_patient_appointment(
         # Extract attendee details
         is_dep = bool(req.is_dependent)
         beneficiary_name = req.patient_name or req.beneficiary_name or (patient.name if not is_dep else None)
-        beneficiary_age = req.patient_age or req.beneficiary_age or 35
+        try:
+            beneficiary_age = int(req.patient_age or req.beneficiary_age or 35)
+        except (ValueError, TypeError):
+            beneficiary_age = 35
         beneficiary_gender = req.patient_gender or req.beneficiary_gender or "Male"
         contact_phone = req.contact_phone or patient.phone
 
