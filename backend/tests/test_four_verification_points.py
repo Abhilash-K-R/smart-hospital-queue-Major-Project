@@ -13,7 +13,16 @@ Comprehensive test suite verifying the 4 specific verification questions:
 """
 
 import time
+import os
+import sys
 import requests
+
+backend_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+if backend_dir not in sys.path:
+    sys.path.insert(0, backend_dir)
+
+from database import engine
+from sqlmodel import Session, select, text
 
 BASE_URL = "http://localhost:8000"
 
@@ -126,8 +135,6 @@ def run_four_point_verification():
     doc_id_clean = 4  # Dr. Vikram K. Rao (Orthopedics)
 
     # Clean existing test appointments for this isolated doctor & test_date
-    from database import engine
-    from sqlmodel import Session, text
     with Session(engine) as sess:
         sess.exec(text("DELETE FROM appointment WHERE appointment_date = :d AND doctor_id = :doc_id").params(d=test_date, doc_id=doc_id_clean))
         sess.commit()

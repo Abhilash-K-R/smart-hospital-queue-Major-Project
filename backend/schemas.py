@@ -233,16 +233,21 @@ class AppointmentBookRequest(BaseModel):
     timeSlot: Optional[str] = None
     symptoms: Optional[str] = None
     patient_name: Optional[str] = None
-    patient_id: Optional[str] = None
-    patient_age: Optional[int] = None
+    patient_id: Optional[Union[int, str]] = None
+    patient_age: Optional[Union[int, str]] = None
     patient_gender: Optional[str] = None
     contact_phone: Optional[str] = None
     is_dependent: Optional[bool] = False
     beneficiary_name: Optional[str] = None
-    beneficiary_age: Optional[int] = None
+    beneficiary_age: Optional[Union[int, str]] = None
     beneficiary_gender: Optional[str] = None
     email: Optional[str] = None
     phone: Optional[str] = None
+    patient_lat: Optional[float] = None
+    patient_lng: Optional[float] = None
+    origin_name: Optional[str] = None
+    origin_mode: Optional[str] = None
+    is_family_booking: Optional[bool] = False
 
 
 class AppointmentBookResponse(BaseModel):
