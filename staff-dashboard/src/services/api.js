@@ -1,8 +1,19 @@
 import axios from 'axios';
 
+const getApiBaseUrl = () => {
+  if (typeof window !== 'undefined' && window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1') {
+    const envUrl = import.meta.env.VITE_API_BASE_URL;
+    if (!envUrl || envUrl.includes('localhost') || envUrl.includes('127.0.0.1')) {
+      return 'https://smart-hospital-queue-major-project.onrender.com';
+    }
+    return envUrl;
+  }
+  return import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
+};
+
 // Create an Axios instance
 const api = axios.create({
-  baseURL: import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000',
+  baseURL: getApiBaseUrl(),
   headers: {
     'Content-Type': 'application/json',
   },
