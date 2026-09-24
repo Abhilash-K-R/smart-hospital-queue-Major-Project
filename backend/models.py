@@ -14,7 +14,7 @@ Owner: Anjanadri (Phase 1) — Reviewed by Abhilash before Phase 2 begins.
 
 from sqlmodel import SQLModel, Field
 from typing import Optional
-from datetime import datetime
+from datetime import datetime, timezone
 
 
 class Department(SQLModel, table=True):
@@ -105,7 +105,7 @@ class QueueLog(SQLModel, table=True):
     appointment_id: int = Field(foreign_key="appointment.id")
     predicted_wait: float
     actual_wait: Optional[float] = None  # filled in AFTER the consultation happens
-    timestamp: datetime = Field(default_factory=datetime.utcnow)
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
 class Notification(SQLModel, table=True):
@@ -124,4 +124,4 @@ class Notification(SQLModel, table=True):
     message: str
     severity: str = "info"  # 'success', 'info', 'warning', 'critical'
     is_read: bool = Field(default=False)
-    created_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))

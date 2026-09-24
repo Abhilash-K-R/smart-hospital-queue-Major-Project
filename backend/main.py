@@ -1957,7 +1957,7 @@ def create_patient_notification(
             message=message,
             severity=severity,
             is_read=False,
-            created_at=datetime.utcnow()
+            created_at=datetime.now(timezone.utc)
         )
         session.add(notif)
         session.commit()
@@ -1992,8 +1992,10 @@ def get_notifications(current_user: Optional[dict] = Depends(get_optional_curren
 
         if db_notifs:
             items = []
+            now_utc = datetime.now(timezone.utc)
             for n in db_notifs:
-                diff_sec = (datetime.utcnow() - n.created_at).total_seconds()
+                notif_time = n.created_at if n.created_at.tzinfo else n.created_at.replace(tzinfo=timezone.utc)
+                diff_sec = (now_utc - notif_time).total_seconds()
                 if diff_sec < 60:
                     time_str = "Just now"
                 elif diff_sec < 3600:
