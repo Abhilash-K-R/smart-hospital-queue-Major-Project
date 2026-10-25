@@ -1,7 +1,9 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { motion } from 'framer-motion';
-import { Ticket, Users, Clock, Stethoscope, MapPin } from 'lucide-react';
+import { Ticket, Users, Clock, Stethoscope, MapPin, CheckCircle2 } from 'lucide-react';
 import { StatusBadge } from './StatusBadge';
+import { useQueue } from '../context/QueueContext';
+import { patientService } from '../services/patientService';
 
 // Summarizes the patient's token against the currently served queue token.
 export const QueueCard = ({ queueData }) => {
@@ -14,8 +16,19 @@ export const QueueCard = ({ queueData }) => {
     department = "General Medicine",
     roomNo = "OPD Consultation Room",
     status = "pending",
-    isExpired = false
+    isExpired = false,
+    is_arrived = false
   } = queueData || {};
+
+  const { fetchQueueData } = useQueue();
+  const [marking, setMarking] = useState(false);
+
+  const handleArrive = async () => {
+    setMarking(true);
+    await patientService.arriveAppointment(tokenNumber || queueData.numericToken);
+    await fetchQueueData(tokenNumber || queueData.numericToken);
+    setMarking(false);
+  };
 
   if (!tokenNumber) return null;
 
@@ -81,6 +94,26 @@ export const QueueCard = ({ queueData }) => {
           <span className="truncate">{roomNo}</span>
         </div>
       </div>
+      
+      {!isSlotExpired && status !== 'completed' && (
+        <div className="mt-4 pt-4 border-t border-slate-200 dark:border-slate-800">
+          {is_arrived ? (
+            <div className="w-full py-3 bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400 rounded-xl flex items-center justify-center gap-2 font-medium">
+              <CheckCircle2 className="w-5 h-5" />
+              You are marked as Arrived
+            </div>
+          ) : (
+            <button 
+              onClick={handleArrive}
+              disabled={marking}
+              className="w-full py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-medium transition-colors disabled:opacity-70 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+            >
+              <MapPin className="w-5 h-5" />
+              {marking ? 'Marking...' : 'I am in Hospital'}
+            </button>
+          )}
+        </div>
+      )}
     </motion.div>
   );
 };

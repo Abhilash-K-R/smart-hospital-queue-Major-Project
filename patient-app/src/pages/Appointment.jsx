@@ -146,6 +146,16 @@ export const getTodayDateString = () => {
   return `${year}-${month}-${day}`;
 };
 
+// Calculate max date string (today + 3 days)
+export const getMaxDateString = () => {
+  const date = new Date();
+  date.setDate(date.getDate() + 3);
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
+
 // Handles appointment validation, AI department prediction, token confirmation, and location origin.
 export const Appointment = () => {
   const navigate = useNavigate();
@@ -157,6 +167,7 @@ export const Appointment = () => {
 
   // Dynamic local date calculation (local timezone)
   const todayDate = useMemo(() => getTodayDateString(), []);
+  const maxDate = useMemo(() => getMaxDateString(), []);
 
   // Dual Mode Location Hook
   const {
@@ -204,21 +215,35 @@ export const Appointment = () => {
     }
   }, [attendeeType, user, setValue]);
 
-  // Dynamic Time Slot Availability Calculation based on selected date and current time
+  // Calculate offline travel time estimate
+  const travelTimeMinutes = useMemo(() => {
+    const lat = Number(coords?.lat) || 13.376230;
+    const lng = Number(coords?.lng) || 77.097439;
+    const approxDist = Math.round(Math.sqrt(Math.pow((lat - 13.376230) * 111, 2) + Math.pow((lng - 77.097439) * 111 * Math.cos(13.376230 * Math.PI / 180), 2)) * 10) / 10;
+    return Math.max(2, Math.round((approxDist / 45) * 60));
+  }, [coords]);
+
+  // Dynamic Time Slot Availability Calculation based on selected date and current time + travel time
   const computedSlots = useMemo(() => {
     const isToday = selectedDate === todayDate;
     const now = new Date();
     const currentMinutes = now.getHours() * 60 + now.getMinutes();
+    const requiredBufferMinutes = travelTimeMinutes + 15;
 
     return OPD_TIME_SLOTS.map(slot => {
       const slotMinutes = slot.hour * 60 + slot.minute;
-      const isPast = isToday && (slotMinutes <= currentMinutes);
+      const isPast = isToday && (slotMinutes <= currentMinutes + requiredBufferMinutes);
+      let label = slot.label;
+      if (isPast && isToday && slotMinutes > currentMinutes) {
+        label = `${slot.time} - Too soon to travel (${travelTimeMinutes}m away)`;
+      }
       return {
         ...slot,
+        label,
         isPast
       };
     });
-  }, [selectedDate, todayDate]);
+  }, [selectedDate, todayDate, travelTimeMinutes]);
 
   const activeAvailableSlots = useMemo(() => {
     return computedSlots.filter(s => !s.isPast);
@@ -350,8 +375,8 @@ export const Appointment = () => {
           doctorId: docObj?.doctorId || 3,
           department: res?.department || data.department,
           roomNo: res?.roomNo || docObj?.roomNo || "Room 204",
-          patient_lat: coords.lat,
-          patient_lng: coords.lng,
+          patient_lat: coords?.lat || 13.376230,
+          patient_lng: coords?.lng || 77.097439,
           origin_location: locationState
         };
         setUser(updatedUser);
@@ -696,6 +721,7 @@ export const Appointment = () => {
                   <input
                     type="date"
                     min={todayDate}
+                    max={maxDate}
                     {...register('date', {
                       onChange: (e) => {
                         const val = e.target.value;
@@ -704,6 +730,13 @@ export const Appointment = () => {
                           setBookingError({
                             type: "warning",
                             message: "Cannot book appointments for past dates. Date has been reset to today."
+                          });
+                        }
+                        if (val && val > maxDate) {
+                          setValue('date', maxDate);
+                          setBookingError({
+                            type: "warning",
+                            message: "Cannot book appointments more than 3 days in advance. Date has been reset to the maximum allowed."
                           });
                         }
                       }

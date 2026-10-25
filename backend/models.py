@@ -35,6 +35,7 @@ class Doctor(SQLModel, table=True):
     name: str
     department_id: int = Field(foreign_key="department.id")  # links to Department table
     avg_consult_minutes: int
+    is_present: bool = Field(default=True)
 
 
 class Patient(SQLModel, table=True):
@@ -93,7 +94,7 @@ class Appointment(SQLModel, table=True):
     beneficiary_gender: Optional[str] = Field(default=None)
     contact_phone: Optional[str] = Field(default=None)
     is_dependent: bool = Field(default=False)
-
+    is_arrived: bool = Field(default=False)
 
 class QueueLog(SQLModel, table=True):
     """

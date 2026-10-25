@@ -349,9 +349,16 @@ const Queue = () => {
                   </td>
 
                   <td className="py-4 px-6">
-                    <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium border ${getTriageColor(patient.triage)}`}>
-                      {patient.triage}
-                    </span>
+                    <div className="flex gap-2">
+                      <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium border ${getTriageColor(patient.triage)}`}>
+                        {patient.triage}
+                      </span>
+                      {patient.is_arrived && (
+                        <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium border bg-green-100 text-green-700 border-green-200">
+                          Arrived
+                        </span>
+                      )}
+                    </div>
                   </td>
                   <td className="py-4 px-6">
                     <div className="text-sm font-semibold text-slate-900">{patient.waitTime}</div>
@@ -377,9 +384,9 @@ const Queue = () => {
                       {patient.status !== 'serving' && (
                         <button 
                           onClick={() => updateStatus(patient.id, 'serving')}
-                          disabled={!!updatingId}
-                          className="px-2.5 py-1 bg-blue-50 text-blue-700 hover:bg-blue-100 rounded-lg text-xs font-medium flex items-center gap-1 transition-colors border border-blue-200 disabled:opacity-50"
-                          title="Call into Consultation Room"
+                          disabled={!!updatingId || !patient.is_arrived}
+                          className={`px-2.5 py-1 rounded-lg text-xs font-medium flex items-center gap-1 transition-colors border disabled:opacity-50 ${patient.is_arrived ? 'bg-blue-50 text-blue-700 hover:bg-blue-100 border-blue-200' : 'bg-slate-100 text-slate-400 border-slate-200'}`}
+                          title={patient.is_arrived ? "Call into Consultation Room" : "Patient has not marked themselves as arrived"}
                         >
                           <PhoneForwarded className="h-3.5 w-3.5" />
                           {updatingId === `${patient.id}-serving` ? 'Serving...' : 'Serve'}

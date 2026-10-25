@@ -272,6 +272,7 @@ def list_doctors(department_id: int = None):
                     experience=meta.get("experience", "10 Years Exp."),
                     status=doc_state.get("status", "Active"),
                     delay_minutes=doc_state.get("delay_minutes", 0),
+                    is_present=doc.is_present,
                 )
             )
         return result
@@ -674,6 +675,7 @@ def get_my_appointments(
                     patient_gender=appt.beneficiary_gender,
                     contact_phone=d_phone,
                     is_dependent=bool(appt.is_dependent),
+                    is_arrived=appt.is_arrived,
                     patientsAhead=patients_ahead,
                     estimatedWaitMinutes=est_wait,
                 )
@@ -711,6 +713,35 @@ def cancel_appointment(token_or_id: str):
             "message": "Appointment cancelled successfully",
             "appointment_id": appointment.id,
             "status": "cancelled"
+        }
+
+
+@app.post("/appointments/{token_or_id}/arrive")
+def arrive_appointment(token_or_id: str):
+    """
+    Marks the patient as arrived at the hospital.
+    """
+    clean_id_str = token_or_id.upper().replace("OPD-", "").strip()
+    try:
+        appt_id = int(clean_id_str)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid appointment ID or token format")
+
+    with Session(engine) as session:
+        appointment = session.get(Appointment, appt_id)
+        if not appointment:
+            raise HTTPException(status_code=404, detail="Appointment not found")
+
+        appointment.is_arrived = True
+        session.add(appointment)
+        session.commit()
+        session.refresh(appointment)
+
+        return {
+            "success": True,
+            "message": "Patient marked as arrived successfully",
+            "appointment_id": appointment.id,
+            "is_arrived": True
         }
 
 
@@ -1719,6 +1750,7 @@ def book_patient_appointment(
                 patient_gender=beneficiary_gender,
                 contact_phone=contact_phone,
                 is_dependent=is_dep,
+                is_arrived=appointment.is_arrived,
                 patient=patient_payload,
             )
     except HTTPException:
@@ -1818,6 +1850,7 @@ def get_frontend_queue_status(token_identifier: str):
                 roomNo=meta.get("room", "Room 204"),
                 emergencyCount=0,
                 lastUpdated=now_str,
+                is_arrived=appointment.is_arrived,
             )
 
         active_doctor_queue = get_sorted_doctor_appointments(session, doctor_id=appointment.doctor_id, appointment_date=appointment.appointment_date)
@@ -1850,6 +1883,7 @@ def get_frontend_queue_status(token_identifier: str):
             roomNo=meta.get("room", "Room 204"),
             emergencyCount=0,
             lastUpdated=now_str,
+            is_arrived=appointment.is_arrived,
         )
 
 
@@ -2425,6 +2459,7 @@ def get_staff_queue():
                     booked_time=booked_str,
                     time_slot=slot_str,
                     appointment_date=appt.appointment_date,
+                    is_arrived=appt.is_arrived,
                 )
             )
 
@@ -2976,6 +3011,7 @@ def get_staff_doctors():
                 "roomNo": meta.get("room", "Room 204"),
                 "qualification": meta.get("qualification", "MBBS, MD"),
                 "experience": meta.get("experience", "10 Years Exp."),
+                "is_present": getattr(d, "is_present", True),
             })
         return result
 
@@ -2990,8 +3026,12 @@ def update_doctor_status(doctor_id: int, req: DoctorStatusUpdateRequest):
             raise HTTPException(status_code=404, detail="Doctor not found")
         if req.avg_consult_minutes:
             doc.avg_consult_minutes = req.avg_consult_minutes
-            session.add(doc)
-            session.commit()
+            
+        if req.is_present is not None:
+            doc.is_present = req.is_present
+
+        session.add(doc)
+        session.commit()
 
         doctor_delays[doctor_id] = {
             "status": req.status,
@@ -3317,4 +3357,4 @@ def get_doctor_room_consultation(doctor_id: int):
             "upcoming_patients": upcoming_patients
         }
 
-
+
