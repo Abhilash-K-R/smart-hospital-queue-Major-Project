@@ -1,16 +1,18 @@
 import React, { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useQueue } from '../context/QueueContext';
 import { TopBar } from '../components/TopBar';
 import { PatientCard } from '../components/PatientCard';
 import { Button } from '../components/Button';
 import { QRCodeSVG } from 'qrcode.react';
-import { User, FileText, Download, Edit3, Save, ShieldCheck, HeartPulse, History, MapPin, Phone, Mail } from 'lucide-react';
+import { User, FileText, Download, Edit3, Save, ShieldCheck, HeartPulse, History, MapPin, Phone, Mail, LogOut } from 'lucide-react';
 import { downloadAppointmentPDF } from '../utils/helpers';
 
 // Displays editable patient details and digital pass export controls.
 export const Profile = () => {
-  const { user, setUser } = useAuth();
+  const navigate = useNavigate();
+  const { user, setUser, logout } = useAuth();
   const { queueState } = useQueue();
   const [isEditing, setIsEditing] = useState(false);
   const [formData, setFormData] = useState({
@@ -163,6 +165,17 @@ export const Profile = () => {
             >
               Export Medical Summary (PDF)
             </Button>
+
+            <button
+              onClick={() => {
+                logout();
+                navigate('/');
+              }}
+              className="w-full py-2.5 px-4 rounded-2xl text-xs font-bold text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/40 border border-red-200 dark:border-red-900/50 transition-colors flex items-center justify-center gap-2"
+            >
+              <LogOut className="w-4 h-4" />
+              <span>Logout Patient Session</span>
+            </button>
           </div>
         </div>
 

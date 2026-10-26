@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
-import { useNavigate, Link, useSearchParams } from 'react-router-dom';
+import { useNavigate, Link, useSearchParams, useLocation } from 'react-router-dom';
 import { loginSchema } from '../utils/validators';
 import { useAuth } from '../context/AuthContext';
 import { Input } from '../components/Input';
@@ -13,8 +13,11 @@ import { patientService } from '../services/patientService';
 // Validates credentials, invokes the patient service, and starts the session.
 export const Login = () => {
   const navigate = useNavigate();
+  const location = useLocation();
   const [searchParams] = useSearchParams();
   const { login } = useAuth();
+
+  const redirectTarget = location.state?.from?.pathname || '/dashboard';
   
   const isJustRegistered = searchParams.get('registered') === 'true';
   const isJustReset = searchParams.get('reset') === 'true';
@@ -44,10 +47,10 @@ export const Login = () => {
       });
       if (res && res.user) {
         login(res.user);
-        navigate('/dashboard');
+        navigate(redirectTarget, { replace: true });
       } else {
         login({ name: "Patient", phone: data.emailOrPhone, email: data.emailOrPhone });
-        navigate('/dashboard');
+        navigate(redirectTarget, { replace: true });
       }
     } catch (err) {
       const errorMsg = err.response?.data?.detail || "Invalid mobile number or password.";
@@ -57,7 +60,7 @@ export const Login = () => {
 
   const handleDemoLogin = () => {
     login(DEMO_PATIENT);
-    navigate('/dashboard');
+    navigate(redirectTarget, { replace: true });
   };
 
   return (
@@ -157,7 +160,11 @@ export const Login = () => {
 
           <div className="pt-4 border-t border-slate-200 dark:border-slate-800 text-center text-xs text-slate-500">
             Don't have an account?{' '}
-            <Link to="/register" className="text-blue-600 dark:text-blue-400 font-bold hover:underline">
+            <Link
+              to="/register"
+              state={{ from: location.state?.from }}
+              className="text-blue-600 dark:text-blue-400 font-bold hover:underline"
+            >
               Sign Up / Register
             </Link>
           </div>
