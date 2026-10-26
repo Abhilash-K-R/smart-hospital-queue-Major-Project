@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
-import { useNavigate, Link } from 'react-router-dom';
+import { useNavigate, Link, useLocation } from 'react-router-dom';
 import { signupSchema } from '../utils/validators';
 import { patientService } from '../services/patientService';
 import { Input } from '../components/Input';
@@ -10,6 +10,7 @@ import { Activity, User, Phone, Lock, UserPlus, CheckCircle2, AlertCircle, Arrow
 
 export const Register = () => {
   const navigate = useNavigate();
+  const location = useLocation();
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [apiError, setApiError] = useState(null);
 
@@ -35,7 +36,9 @@ export const Register = () => {
       });
 
       if (res && res.success) {
-        navigate(`/login?registered=true&phone=${encodeURIComponent(data.phone.trim())}`);
+        navigate(`/login?registered=true&phone=${encodeURIComponent(data.phone.trim())}`, {
+          state: { from: location.state?.from }
+        });
       } else {
         setApiError(res?.message || "Registration failed. Please try again.");
       }
@@ -124,7 +127,11 @@ export const Register = () => {
           <div className="pt-4 border-t border-slate-200 dark:border-slate-800 flex items-center justify-between text-xs text-slate-500">
             <div>
               Already have an account?{' '}
-              <Link to="/login" className="text-blue-600 dark:text-blue-400 font-bold hover:underline inline-flex items-center gap-1">
+              <Link
+                to="/login"
+                state={{ from: location.state?.from }}
+                className="text-blue-600 dark:text-blue-400 font-bold hover:underline inline-flex items-center gap-1"
+              >
                 Sign In <ArrowRight className="w-3 h-3" />
               </Link>
             </div>

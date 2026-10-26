@@ -130,7 +130,7 @@ export const Navbar = () => {
 
           {/* User Profile / Auth State */}
           {user ? (
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-1.5 sm:gap-2">
               <Link
                 to="/profile"
                 className="flex items-center gap-2.5 py-1.5 px-3 rounded-2xl bg-blue-50/90 dark:bg-blue-950/50 border border-blue-200 dark:border-blue-900/60 hover:border-blue-400 hover:bg-blue-100/60 dark:hover:bg-blue-900/40 transition-all shrink-0 min-w-max shadow-sm"
@@ -144,6 +144,16 @@ export const Navbar = () => {
                   {user.name}
                 </span>
               </Link>
+              <button
+                onClick={() => {
+                  logout();
+                  navigate('/');
+                }}
+                className="p-2 rounded-xl text-slate-500 hover:text-red-600 dark:hover:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/40 transition-colors"
+                title="Logout Session"
+              >
+                <LogOut className="w-4 h-4" />
+              </button>
             </div>
           ) : (
             <Button size="sm" icon={User} onClick={() => navigate('/login')}>
@@ -184,6 +194,19 @@ export const Navbar = () => {
                 {link.label}
               </Link>
             ))}
+            {user && (
+              <button
+                onClick={() => {
+                  setIsMobileMenuOpen(false);
+                  logout();
+                  navigate('/');
+                }}
+                className="w-full text-left px-4 py-2.5 rounded-xl text-sm font-bold text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/40 flex items-center gap-2"
+              >
+                <LogOut className="w-4 h-4" />
+                <span>Logout ({user.name})</span>
+              </button>
+            )}
           </motion.div>
         )}
       </AnimatePresence>
