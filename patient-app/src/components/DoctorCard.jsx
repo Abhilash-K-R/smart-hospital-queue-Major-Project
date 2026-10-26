@@ -12,6 +12,10 @@ export const DoctorCard = ({ doctor, onBook }) => {
         <img
           src={avatar}
           alt={name}
+          onError={(e) => {
+            e.currentTarget.onerror = null;
+            e.currentTarget.src = "https://images.unsplash.com/photo-1559839734-2b71ea197ec2?auto=format&fit=crop&q=80&w=250";
+          }}
           className="w-16 h-16 rounded-2xl object-cover ring-2 ring-blue-500/20 shadow-md shrink-0"
         />
         <div className="flex-1 min-w-0">
