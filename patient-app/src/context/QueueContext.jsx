@@ -117,7 +117,8 @@ export const QueueProvider = ({ children }) => {
                 department: active.department || prev.department,
                 roomNo: active.roomNo || prev.roomNo,
                 timeSlot: active.time_slot,
-                appointmentDate: active.appointment_date
+                appointmentDate: active.appointment_date,
+                is_arrived: active.is_arrived
               }));
               fetchQueueData(allocatedToken);
               return;
@@ -142,7 +143,8 @@ export const QueueProvider = ({ children }) => {
                 department: recent.department || prev.department,
                 roomNo: recent.roomNo || prev.roomNo,
                 timeSlot: recent.time_slot,
-                appointmentDate: recent.appointment_date
+                appointmentDate: recent.appointment_date,
+                is_arrived: recent.is_arrived
               }));
               return;
             }

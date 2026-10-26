@@ -1,0 +1,22 @@
+# All local documentation, proposals, diagrams, and artifacts
+documents/
+
+# Document files & presentations (Local only, not pushed to GitHub)
+*.doc
+*.docx
+*.pdf
+*.pptx
+
+# Helper & test scripts
+fill_kscst_proposal.py
+test_word.ps1
+
+# Diagrams
+system_architecture_diagram.jpg
+methodology_flowchart_diagram.jpg
+
+# Python & Environment artifacts
+__pycache__/
+*.py[cod]
+.env
+venv/

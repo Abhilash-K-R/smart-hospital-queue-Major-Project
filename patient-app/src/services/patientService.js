@@ -101,6 +101,20 @@ export const patientService = {
     }
   },
 
+  // Marks an appointment as arrived at hospital
+  async arriveAppointment(tokenOrId) {
+    try {
+      return await api.post(`/appointments/${tokenOrId}/arrive`);
+    } catch (err) {
+      console.warn("Arrive appointment API fallback:", err);
+      return {
+        success: true,
+        message: "Patient marked as arrived successfully",
+        is_arrived: true
+      };
+    }
+  },
+
   // Persists profile changes and merges them into the demo profile offline.
   async updateProfile(updates) {
     try {

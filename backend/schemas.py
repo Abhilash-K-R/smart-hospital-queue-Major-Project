@@ -43,6 +43,7 @@ class DoctorResponse(BaseModel):
     name: str
     department_id: int
     avg_consult_minutes: int
+    is_present: bool = True
     department: Optional[str] = None
     roomNo: Optional[str] = None
     qualification: Optional[str] = None
@@ -131,6 +132,7 @@ class AppointmentResponse(BaseModel):
     primary_patient_name: Optional[str] = None
     patientsAhead: Optional[int] = 0
     estimatedWaitMinutes: Optional[float] = 0.0
+    is_arrived: Optional[bool] = False
 
     
 
@@ -286,6 +288,7 @@ class FrontendQueueStatusResponse(BaseModel):
     roomNo: str
     emergencyCount: int
     lastUpdated: str
+    is_arrived: Optional[bool] = False
 
 
 
@@ -399,6 +402,7 @@ class StaffQueueItem(BaseModel):
     booked_time: str
     time_slot: Optional[str] = "09:30 AM"
     appointment_date: Optional[str] = None
+    is_arrived: Optional[bool] = False
 
 
 
@@ -433,6 +437,7 @@ class DoctorStatusUpdateRequest(BaseModel):
     status: str = "Active"  # 'Active', 'On Break', 'Delayed'
     avg_consult_minutes: int | None = None
     delay_minutes: int | None = 0
+    is_present: bool | None = None
 
 
 # ---------------------------------------------------------------------
