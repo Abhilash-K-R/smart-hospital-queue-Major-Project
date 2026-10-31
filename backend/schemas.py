@@ -207,6 +207,13 @@ class ForgotPasswordResponse(BaseModel):
     otp: Optional[str] = None
 
 
+class PatientProfileUpdateRequest(BaseModel):
+    name: Optional[str] = None
+    fullName: Optional[str] = None
+    phone: Optional[str] = None
+    email: Optional[str] = None
+
+
 class FrontendRegisterRequest(BaseModel):
     name: str | None = None
     fullName: str | None = None
@@ -519,4 +526,4 @@ class StaffWalkInRegisterResponse(BaseModel):
     estimatedWaitMinutes: float
     booked_time: str
 
-
+
