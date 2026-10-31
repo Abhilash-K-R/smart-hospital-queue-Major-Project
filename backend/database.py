@@ -38,6 +38,8 @@ def _fallback_getaddrinfo(host, port, family=0, type=0, proto=0, flags=0):
 socket.getaddrinfo = _fallback_getaddrinfo
 
 from dotenv import load_dotenv
+env_path = os.path.join(os.path.dirname(__file__), ".env")
+load_dotenv(env_path)
 load_dotenv()
 
 DATABASE_URL = os.getenv("DATABASE_URL")
@@ -83,4 +85,4 @@ engine = create_engine(
     max_overflow=20,
     connect_args=connect_args
 )
-
+
