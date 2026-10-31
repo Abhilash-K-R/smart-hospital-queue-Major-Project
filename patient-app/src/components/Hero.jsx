@@ -57,7 +57,7 @@ export const Hero = () => {
               transition={{ delay: 0.2 }}
               className="text-base sm:text-lg text-slate-600 dark:text-slate-300 max-w-2xl leading-relaxed mx-auto lg:mx-0"
             >
-              Never wait endlessly in hospital waiting rooms again. Our Machine Learning algorithms predict OPD consultation delays and send optimal <strong className="text-blue-600 dark:text-blue-400">Leave Now</strong> departure notifications straight to your phone.
+              Never wait endlessly in hospital waiting rooms again. Our intelligent scheduling system monitors real-time OPD flow and sends optimal <strong className="text-blue-600 dark:text-blue-400">Leave Now</strong> departure alerts straight to your phone.
             </motion.p>
 
             {/* Action Buttons */}
@@ -72,7 +72,7 @@ export const Hero = () => {
               </Button>
 
               <Button size="lg" variant="outline" icon={Clock} onClick={() => navigate('/arrival-prediction')}>
-                Test "Leave Now" AI
+                Track "Leave Now" Status
               </Button>
             </motion.div>
 
@@ -98,7 +98,7 @@ export const Hero = () => {
 
             {/* Trust Badges */}
             <div className="flex flex-wrap items-center justify-center lg:justify-start gap-6 text-xs text-slate-500 font-semibold pt-4">
-              <span className="flex items-center gap-1.5"><CheckCircle2 className="w-4 h-4 text-emerald-500" /> 96.4% Random Forest Accuracy</span>
+              <span className="flex items-center gap-1.5"><CheckCircle2 className="w-4 h-4 text-emerald-500" /> Verified On-Time Consultations</span>
               <span className="flex items-center gap-1.5"><CheckCircle2 className="w-4 h-4 text-cyan-500" /> Real-time Traffic Integration</span>
               <span className="flex items-center gap-1.5"><CheckCircle2 className="w-4 h-4 text-blue-500" /> Zero Waiting Room Crowding</span>
             </div>
@@ -120,8 +120,8 @@ export const Hero = () => {
                     <Activity className="w-5 h-5 animate-spin-slow" />
                   </div>
                   <div>
-                    <h3 className="text-sm font-extrabold text-slate-900 dark:text-white">AI Live Queue Simulation</h3>
-                    <p className="text-[10px] text-emerald-500 font-semibold">● System Online & Optimizing</p>
+                    <h3 className="text-sm font-extrabold text-slate-900 dark:text-white">Live Hospital OPD Queue</h3>
+                    <p className="text-[10px] text-emerald-500 font-semibold">● Live OPD Counters Active</p>
                   </div>
                 </div>
                 <span className="px-2.5 py-1 text-[11px] font-bold bg-blue-50 dark:bg-blue-950 text-blue-600 dark:text-blue-400 rounded-xl">

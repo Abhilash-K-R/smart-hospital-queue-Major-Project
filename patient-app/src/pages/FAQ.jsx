@@ -10,8 +10,8 @@ export const FAQ = () => {
 
   const faqs = [
     {
-      q: "How does AI predict hospital waiting time?",
-      a: "Our Random Forest Regressor analyzes doctor consultation speeds, historical patient load for that day of the week, symptom complexity, and historical patient turnaround time to estimate exact consultation duration per token.",
+      q: "How does the system estimate hospital waiting time?",
+      a: "Our smart wait-time system analyzes doctor consultation pace, active department queue length, patient symptoms, and real-time counter flow to estimate your exact consultation start time.",
       icon: BrainCircuit
     },
     {
@@ -40,7 +40,7 @@ export const FAQ = () => {
 
   return (
     <div className="space-y-8 max-w-4xl mx-auto">
-      <TopBar title="Frequently Asked Questions" subtitle="Understanding the AI Smart Queue & Arrival Optimization Engine" />
+      <TopBar title="Frequently Asked Questions" subtitle="Patient guide to OPD tokens, queue tracking, and Leave Now departure alerts" />
 
       {/* Search Bar */}
       <div className="relative">

@@ -244,8 +244,8 @@ export const RECENT_NOTIFICATIONS = [
 export const HOSPITAL_STATS = [
   { label: "Patients Served Today", value: "482", icon: "Users", change: "+14% vs yesterday" },
   { label: "Average Waiting Saved", value: "38 Mins", icon: "Clock", change: "AI Optimization active" },
-  { label: "AI Model Accuracy", value: "96.4%", icon: "BrainCircuit", change: "Random Forest model" },
-  { label: "Emergency Cases Processed", value: "14", icon: "ShieldAlert", change: "Zero delay handling" }
+  { label: "On-Time Consultations", value: "98.2%", icon: "CheckCircle2", change: "Verified OPD schedule" },
+  { label: "Emergency Cases Handled", value: "14", icon: "ShieldAlert", change: "Immediate zero-delay care" }
 ];
 
 export const KANNADA_TRANSLATIONS = {

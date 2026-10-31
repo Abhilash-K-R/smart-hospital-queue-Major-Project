@@ -72,30 +72,30 @@ export const Home = () => {
               Why Shridevi MediFlow AI Revolutionizes Healthcare Queues
             </h2>
             <p className="text-sm text-slate-600 dark:text-slate-300">
-              Combining Machine Learning queue modeling with real-time GPS traffic analysis to eliminate crowded waiting rooms completely.
+              Combining smart queue scheduling with real-time GPS traffic analysis to eliminate crowded hospital waiting rooms completely.
             </p>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
             <FeatureCard
               icon={BrainCircuit}
-              title="Random Forest Delay Predictor"
-              description="Predicts OPD consultation time per patient with 96.4% accuracy based on doctor consultation speed and patient severity."
-              badge="ML Engine"
+              title="Smart Wait-Time Forecast"
+              description="Calculates accurate consultation start timings based on live doctor progress, active patient load, and department schedule."
+              badge="Accurate OPD Forecast"
               color="from-blue-500 to-indigo-600"
             />
             <FeatureCard
               icon={Navigation}
-              title="Smart Departure Engine"
-              description="Notifies patients exactly when to leave home, factoring in real-time Google Maps traffic data to arrive 5 mins before consultation."
-              badge="Leave Now"
+              title="Smart 'Leave Now' Alerts"
+              description="Notifies you exactly when to start from home with real-time traffic sync, ensuring you arrive just 5 minutes before your consultation."
+              badge="Dual-Channel SMS & App"
               color="from-cyan-500 to-blue-500"
             />
             <FeatureCard
               icon={ShieldAlert}
-              title="Dynamic Emergency Handling"
-              description="When trauma emergency cases are admitted, non-critical queue departure times automatically recalculate to prevent congestion."
-              badge="Emergency AI"
+              title="Priority Emergency Protection"
+              description="Critical trauma emergencies receive instant care while regular appointment timings automatically adjust to avoid crowded waiting rooms."
+              badge="Emergency Care"
               color="from-rose-500 to-red-600"
             />
           </div>
@@ -111,8 +111,8 @@ export const Home = () => {
           <div className="grid grid-cols-1 md:grid-cols-4 gap-6 relative">
             {[
               { step: "01", title: "Book Appointment", desc: "Select doctor & get instant digital token", icon: Stethoscope },
-              { step: "02", title: "ML Wait Calculation", desc: "Algorithm computes precise OPD consultation rate", icon: Cpu },
-              { step: "03", title: "Smart Notification", desc: "Get 'Leave Now' alert on phone when traffic matches wait", icon: Navigation },
+              { step: "02", title: "Live Queue Tracking", desc: "System tracks consultation pace and counter progress", icon: Cpu },
+              { step: "03", title: "Timely Mobile Alert", desc: "Get 'Leave Now' alert on phone when traffic matches wait", icon: Navigation },
               { step: "04", title: "Zero Wait Arrival", desc: "Arrive at hospital lounge 5 mins before your call", icon: CheckCircle2 }
             ].map((st, idx) => {
               const Icon = st.icon;

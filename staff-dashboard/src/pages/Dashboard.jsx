@@ -155,13 +155,27 @@ const Dashboard = () => {
         </div>
       )}
 
-      {/* Stat Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-        <StatCard title="Total Appointments Today" value={stats.total_today} icon={Users} trend="+Today" />
-        <StatCard title="Currently Waiting" value={stats.currently_waiting} icon={Clock} subtitle="Active in OPD Queue" />
-        <StatCard title="Average Wait Time" value={`${Math.round(stats.avg_wait_minutes || 18)}m`} icon={Activity} trend="AI Predicted" subtitle="Random Forest ML" />
-        <StatCard title="Active OPD Doctors" value={stats.active_doctors || doctors.length || 8} icon={UserPlus} trend="Online" subtitle="Available Consultation" />
-      </div>
+      {/* Calculate dynamic active doctor count excluding those On Break */}
+      {(() => {
+        const totalDocs = doctors.length > 0 ? doctors.length : 8;
+        const breakDocs = doctors.filter(d => d.status === 'On Break' || d.status === 'Break' || d.is_present === false).length;
+        const activeDocs = doctors.length > 0 ? (totalDocs - breakDocs) : (stats.active_doctors !== undefined ? stats.active_doctors : 8);
+
+        return (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+            <StatCard title="Total Appointments Today" value={stats.total_today} icon={Users} trend="+Today" />
+            <StatCard title="Currently Waiting" value={stats.currently_waiting} icon={Clock} subtitle="Active in OPD Queue" />
+            <StatCard title="Average Wait Time" value={`${Math.round(stats.avg_wait_minutes || 18)}m`} icon={Activity} trend="AI Predicted" subtitle="Random Forest ML" />
+            <StatCard 
+              title="Active OPD Doctors" 
+              value={activeDocs} 
+              icon={UserPlus} 
+              trend={breakDocs > 0 ? `${activeDocs}/${totalDocs} Active` : "Online"} 
+              subtitle={breakDocs > 0 ? `${breakDocs} Doctor${breakDocs > 1 ? 's' : ''} on Break` : "Available Consultation"} 
+            />
+          </div>
+        );
+      })()}
 
       {/* Doctor Disruption & Operational Delay Controls */}
       <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6 space-y-4">

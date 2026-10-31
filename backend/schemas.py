@@ -131,6 +131,7 @@ class AppointmentResponse(BaseModel):
     is_dependent: Optional[bool] = False
     primary_patient_name: Optional[str] = None
     patientsAhead: Optional[int] = 0
+    patient_uid: Optional[str] = None
     estimatedWaitMinutes: Optional[float] = 0.0
     is_arrived: Optional[bool] = False
 
@@ -187,6 +188,7 @@ class AuthRegisterResponse(BaseModel):
     success: bool = True
     message: str
     patient_id: int
+    patient_uid: Optional[str] = None
     name: str
     phone: str
 
@@ -212,6 +214,16 @@ class PatientProfileUpdateRequest(BaseModel):
     fullName: Optional[str] = None
     phone: Optional[str] = None
     email: Optional[str] = None
+    avatar: Optional[str] = None
+    age: Optional[int] = None
+    gender: Optional[str] = None
+    bloodGroup: Optional[str] = None
+    blood_group: Optional[str] = None
+    address: Optional[str] = None
+    emergency_contact_name: Optional[str] = None
+    emergency_contact_phone: Optional[str] = None
+    emergencyContact: Optional[str] = None
+    allergies: Optional[str] = None
 
 
 class FrontendRegisterRequest(BaseModel):
@@ -328,6 +340,7 @@ class NotificationItem(BaseModel):
     title: str
     message: str
     timestamp: str
+    created_at_iso: Optional[str] = None
     read: bool
     type: str  # 'booking_confirmed', 'next_in_line', 'consultation_completed', 'no_show_warning', 'slot_expired', 'leave_now', 'emergency', 'info'
     severity: Optional[str] = "info"  # 'success', 'info', 'warning', 'critical'

@@ -81,6 +81,18 @@ from datetime import datetime, timedelta, timezone
 IST = timezone(timedelta(hours=5, minutes=30))
 
 
+def to_ist(dt: Optional[datetime]) -> Optional[datetime]:
+    """
+    Centralized timezone converter ensuring all stored UTC datetimes
+    are accurately converted to Indian Standard Time (IST = UTC+5:30).
+    """
+    if dt is None:
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(IST)
+
+
 TRIAGE_PRIORITY = {
     "Emergency": 0,
     "Trauma": 0,
@@ -1373,11 +1385,21 @@ def auth_register(request: AuthRegisterRequest):
             raise HTTPException(status_code=400, detail="Mobile number is already registered. Please sign in.")
 
         email_val = request.email.strip() if request.email else f"{clean_phone}@mediflow.patient"
+        # Atomically allocate sequential patient_uid
+        try:
+            next_uid = session.execute(text("SELECT nextval('patient_uid_seq');")).scalar()
+            assigned_uid = str(next_uid)
+        except Exception:
+            max_curr = session.execute(text("SELECT COALESCE(MAX(CAST(patient_uid AS INTEGER)), 99999) FROM patient;")).scalar()
+            assigned_uid = str(max_curr + 1)
+
         new_patient = Patient(
+            patient_uid=assigned_uid,
             name=raw_name.strip(),
             phone=clean_phone,
             email=email_val,
             password_hash=hash_password(request.password),
+            gender="Male",
         )
         session.add(new_patient)
         session.commit()
@@ -1422,9 +1444,20 @@ def frontend_login(request: FrontendLoginRequest):
 
         user_data = {
             "id": patient.id,
+            "patient_uid": patient.patient_uid or str(100000 + patient.id),
             "name": patient.name,
             "phone": patient.phone,
             "email": patient.email,
+            "avatar": patient.avatar or "https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&q=80&w=250",
+            "age": patient.age,
+            "gender": patient.gender or "Male",
+            "blood_group": patient.blood_group,
+            "bloodGroup": patient.blood_group,
+            "address": patient.address,
+            "emergency_contact_name": patient.emergency_contact_name,
+            "emergency_contact_phone": patient.emergency_contact_phone,
+            "emergencyContact": patient.emergency_contact_phone or patient.emergency_contact_name,
+            "allergies": patient.allergies,
             "appointment_id": appt.id if appt else None,
             "tokenNumber": f"OPD-{appt.id:03d}" if appt else None,
             "numericToken": appt.id if appt else None,
@@ -1897,7 +1930,7 @@ def book_patient_appointment(
 
 @app.get("/patients/profile")
 def get_patient_profile(current_user: dict = Depends(get_current_user)):
-    """Compatibility route for patient profile display."""
+    """Returns complete patient medical profile and permanent patient_uid."""
     patient_id = int(current_user["sub"])
     with Session(engine) as session:
         patient = session.get(Patient, patient_id)
@@ -1905,41 +1938,109 @@ def get_patient_profile(current_user: dict = Depends(get_current_user)):
             raise HTTPException(status_code=404, detail="Patient not found")
         return {
             "id": patient.id,
+            "patient_uid": patient.patient_uid or str(100000 + patient.id),
             "name": patient.name,
             "phone": patient.phone,
             "email": patient.email,
+            "avatar": patient.avatar or "https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&q=80&w=250",
+            "age": patient.age,
+            "gender": patient.gender or "Male",
+            "blood_group": patient.blood_group,
+            "bloodGroup": patient.blood_group,
+            "address": patient.address,
+            "emergency_contact_name": patient.emergency_contact_name,
+            "emergency_contact_phone": patient.emergency_contact_phone,
+            "emergencyContact": patient.emergency_contact_phone or patient.emergency_contact_name,
+            "allergies": patient.allergies,
         }
 
 
 @app.put("/patients/profile")
 def update_patient_profile(updates: PatientProfileUpdateRequest, current_user: dict = Depends(get_current_user)):
-    """Compatibility route for updating patient profile info."""
+    """Persists clinical profile updates, avatar photo, blood group and emergency contact."""
     patient_id = int(current_user["sub"])
     with Session(engine) as session:
         patient = session.get(Patient, patient_id)
         if not patient:
             raise HTTPException(status_code=404, detail="Patient not found")
+        
         name_val = updates.name or updates.fullName
         if name_val:
             cleaned_name = re.sub(r'<[^>]*>', '', name_val).strip()
             if cleaned_name:
                 patient.name = cleaned_name
+        
         if updates.phone:
-            cleaned_phone = re.sub(r"\D", "", updates.phone)
+            cleaned_phone = re.sub(r"\D", "", str(updates.phone))
+            if len(cleaned_phone) > 10 and cleaned_phone.startswith("91"):
+                cleaned_phone = cleaned_phone[2:]
             if len(cleaned_phone) == 10:
                 patient.phone = cleaned_phone
+        
         if updates.email and "@" in updates.email:
             patient.email = updates.email.strip().lower()
+        
+        if updates.avatar:
+            # Allow valid image data URLs or HTTPS image links (limit to 2.5MB payload)
+            if updates.avatar.startswith("data:image/") or updates.avatar.startswith("http://") or updates.avatar.startswith("https://"):
+                if len(updates.avatar) < 3_500_000:
+                    patient.avatar = updates.avatar
+        
+        if updates.age is not None:
+            try:
+                age_int = int(updates.age)
+                if 0 <= age_int <= 125:
+                    patient.age = age_int
+            except (ValueError, TypeError):
+                pass
+        
+        if updates.gender:
+            g = updates.gender.strip().capitalize()
+            if g in ["Male", "Female", "Other"]:
+                patient.gender = g
+        
+        bg_val = updates.bloodGroup or updates.blood_group
+        if bg_val:
+            clean_bg = bg_val.strip().upper()
+            if clean_bg in ["A+", "A-", "B+", "B-", "AB+", "AB-", "O+", "O-"]:
+                patient.blood_group = clean_bg
+        
+        if updates.address is not None:
+            patient.address = re.sub(r'<[^>]*>', '', updates.address).strip()
+        
+        em_phone = updates.emergency_contact_phone or updates.emergencyContact
+        if em_phone:
+            patient.emergency_contact_phone = str(em_phone).strip()
+        
+        if updates.emergency_contact_name:
+            patient.emergency_contact_name = re.sub(r'<[^>]*>', '', updates.emergency_contact_name).strip()
+        
+        if updates.allergies is not None:
+            patient.allergies = re.sub(r'<[^>]*>', '', updates.allergies).strip()
+        
+        patient.updated_at = datetime.now(timezone.utc)
         session.add(patient)
         session.commit()
         session.refresh(patient)
+        
         return {
             "success": True,
             "user": {
                 "id": patient.id,
+                "patient_uid": patient.patient_uid or str(100000 + patient.id),
                 "name": patient.name,
                 "phone": patient.phone,
                 "email": patient.email,
+                "avatar": patient.avatar or "https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&q=80&w=250",
+                "age": patient.age,
+                "gender": patient.gender or "Male",
+                "blood_group": patient.blood_group,
+                "bloodGroup": patient.blood_group,
+                "address": patient.address,
+                "emergency_contact_name": patient.emergency_contact_name,
+                "emergency_contact_phone": patient.emergency_contact_phone,
+                "emergencyContact": patient.emergency_contact_phone or patient.emergency_contact_name,
+                "allergies": patient.allergies,
             },
         }
 
@@ -1975,7 +2076,7 @@ def get_frontend_queue_status(token_identifier: str):
         dept = session.get(Department, doctor.department_id) if (doctor and doctor.department_id) else None
         dept_name = dept.name if dept else "General Medicine"
         meta = DOCTOR_METADATA.get(doctor.name, {}) if doctor else {}
-        now_str = datetime.utcnow().strftime("%I:%M %p")
+        now_str = datetime.now(IST).strftime("%I:%M %p")
 
         if appointment.status in ["expired", "cancelled", "completed"]:
             return FrontendQueueStatusResponse(
@@ -2166,17 +2267,21 @@ def get_notifications(current_user: Optional[dict] = Depends(get_optional_curren
         if db_notifs:
             items = []
             now_utc = datetime.now(timezone.utc)
+            now_ist = datetime.now(IST)
             for n in db_notifs:
-                notif_time = n.created_at if n.created_at.tzinfo else n.created_at.replace(tzinfo=timezone.utc)
-                diff_sec = (now_utc - notif_time).total_seconds()
+                notif_utc = n.created_at if n.created_at.tzinfo else n.created_at.replace(tzinfo=timezone.utc)
+                notif_ist = notif_utc.astimezone(IST)
+                diff_sec = (now_utc - notif_utc).total_seconds()
                 if diff_sec < 60:
                     time_str = "Just now"
                 elif diff_sec < 3600:
                     time_str = f"{int(diff_sec // 60)} mins ago"
-                elif diff_sec < 86400:
+                elif diff_sec < 86400 and notif_ist.date() == now_ist.date():
                     time_str = f"{int(diff_sec // 3600)} hours ago"
+                elif notif_ist.date() == now_ist.date():
+                    time_str = f"Today, {notif_ist.strftime('%I:%M %p')}"
                 else:
-                    time_str = n.created_at.strftime("%b %d, %I:%M %p")
+                    time_str = notif_ist.strftime("%b %d, %I:%M %p")
 
                 items.append(
                     NotificationItem(
@@ -2184,6 +2289,7 @@ def get_notifications(current_user: Optional[dict] = Depends(get_optional_curren
                         title=n.title,
                         message=n.message,
                         timestamp=time_str,
+                        created_at_iso=notif_ist.isoformat(),
                         read=n.is_read,
                         type=n.type,
                         severity=n.severity,
@@ -2379,7 +2485,7 @@ def generate_dispatch_preview(
             sms_text=sms_text,
             whatsapp_share_url=whatsapp_share_url,
             google_maps_url=maps_url,
-            timestamp=datetime.utcnow().strftime("%I:%M %p"),
+            timestamp=datetime.now(IST).strftime("%I:%M %p"),
         )
 
 
@@ -2574,10 +2680,12 @@ def get_staff_queue(_staff: dict = Depends(require_staff_user)):
             booked_str = format_booked_time_ist(appt.booked_time)
             slot_str = appt.time_slot or "09:30 AM"
 
+            pat_uid = pat.patient_uid if pat and pat.patient_uid else str(100000 + appt.patient_id)
             queue_items.append(
                 StaffQueueItem(
                     id=appt.id,
                     patient_id=appt.patient_id,
+                    patient_uid=pat_uid,
                     name=attendee_name,
                     age=attendee_age,
                     gender=attendee_gender,
@@ -3113,11 +3221,17 @@ def get_staff_stats(_staff: dict = Depends(require_staff_user)):
                     "type": "info"
                 })
 
+        active_doctors_count = len([
+            d for d in doctors
+            if doctor_delays.get(d.id, {}).get("status", "Active") not in ["Break", "On Break"]
+            and getattr(d, "is_present", True) is not False
+        ])
+
         return StaffStatsResponse(
             total_today=max(total_today, 25),
             currently_waiting=currently_waiting,
             avg_wait_minutes=avg_wait,
-            active_doctors=len(doctors),
+            active_doctors=active_doctors_count,
             emergency_count=emergency_count,
             recent_activity=recent_activity or [
                 {"id": 1, "text": "Dr. Sharma active in Cardiology OPD", "time": "5 min ago", "type": "info"},
@@ -3168,6 +3282,10 @@ def update_doctor_status(doctor_id: int, req: DoctorStatusUpdateRequest, _staff:
             
         if req.is_present is not None:
             doc.is_present = req.is_present
+        elif req.status in ["Break", "On Break"]:
+            doc.is_present = False
+        elif req.status == "Active":
+            doc.is_present = True
 
         session.add(doc)
         session.commit()
