@@ -20,3 +20,7 @@ __pycache__/
 *.py[cod]
 .env
 venv/
+
+scratch/
+
+create_latest_ppt.py
