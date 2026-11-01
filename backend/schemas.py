@@ -142,6 +142,27 @@ class AppointmentResponse(BaseModel):
 # DEPARTURE-TIME NOTIFICATION
 # ---------------------------------------------------------------------
 
+
+class AvailableSlotItem(BaseModel):
+    slot: str
+    session: str  # morning, afternoon, evening
+    available: bool
+    is_past: bool = False
+    reason: Optional[str] = None
+    busy_until: Optional[str] = None
+    predicted_duration: Optional[int] = 30
+
+class DoctorAvailableSlotsResponse(BaseModel):
+    doctor_id: int
+    doctor_name: str
+    department: str
+    date: str
+    total_slots: int
+    available_count: int
+    next_available_slot: Optional[str] = None
+    sessions: Dict[str, List[AvailableSlotItem]]
+    all_slots: List[AvailableSlotItem]
+
 class DepartureCheckRequest(BaseModel):
     """
     What the patient app sends to check if it's time to leave.
@@ -284,6 +305,8 @@ class AppointmentBookResponse(BaseModel):
     department: str
     roomNo: str
     booked_time: str
+    predicted_duration: Optional[int] = 30
+    symptoms: Optional[str] = None
     time_slot: Optional[str] = None
     timeSlot: Optional[str] = None
     appointment_date: Optional[str] = None
@@ -292,6 +315,8 @@ class AppointmentBookResponse(BaseModel):
     patient_gender: Optional[str] = None
     contact_phone: Optional[str] = None
     is_dependent: Optional[bool] = False
+    predicted_duration: Optional[int] = 30
+    symptoms: Optional[str] = None
     patient: dict
 
 
@@ -321,6 +346,8 @@ class DoctorQueueStreamItem(BaseModel):
     status: str  # 'serving', 'pending', 'completed'
     queue_position: Optional[int] = None
     booked_time: str
+    predicted_duration: Optional[int] = 30
+    symptoms: Optional[str] = None
     waitTime: str
 
 
@@ -420,6 +447,8 @@ class StaffQueueItem(BaseModel):
     waitTime: str
     status: str  # 'pending', 'serving', 'completed', 'skipped'
     booked_time: str
+    predicted_duration: Optional[int] = 30
+    symptoms: Optional[str] = None
     time_slot: Optional[str] = "09:30 AM"
     appointment_date: Optional[str] = None
     is_arrived: Optional[bool] = False
@@ -538,5 +567,7 @@ class StaffWalkInRegisterResponse(BaseModel):
     patientsAhead: int
     estimatedWaitMinutes: float
     booked_time: str
+    predicted_duration: Optional[int] = 30
+    symptoms: Optional[str] = None
 
 

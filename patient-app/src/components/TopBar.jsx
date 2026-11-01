@@ -21,8 +21,11 @@ export const TopBar = ({ title = "Dashboard Overview", subtitle = "Real-time que
         {/* Hospital Status Pill - Dynamic OPD Working Hours check */}
         {(() => {
           const now = new Date();
-          const hour = now.getHours();
-          const isOpdOpen = hour >= 8 && hour < 20; // 08:00 AM - 08:00 PM
+          const currMins = now.getHours() * 60 + now.getMinutes();
+          const isMorning = currMins >= 570 && currMins <= 780;   // 09:30 AM - 01:00 PM
+          const isAfternoon = currMins >= 870 && currMins <= 1050; // 02:30 PM - 05:30 PM
+          const isEvening = currMins >= 1110 && currMins <= 1200;  // 06:30 PM - 08:00 PM
+          const isOpdOpen = isMorning || isAfternoon || isEvening;
 
           return isOpdOpen ? (
             <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-900 text-xs font-semibold text-emerald-600 dark:text-emerald-400">

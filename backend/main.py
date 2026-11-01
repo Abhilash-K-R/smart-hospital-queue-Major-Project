@@ -49,6 +49,7 @@ from schemas import (
     ForgotPasswordRequest, ForgotPasswordResetRequest, ForgotPasswordResponse, PatientProfileUpdateRequest,
     DoctorQueueStreamItem, DoctorQueueStreamResponse,
     StaffWalkInRegisterRequest, StaffWalkInRegisterResponse,
+    AvailableSlotItem, DoctorAvailableSlotsResponse,
 )
 
 
@@ -123,6 +124,110 @@ def parse_slot_time_to_minutes(slot_str: Optional[str]) -> Optional[int]:
     """Compatibility wrapper returning None if invalid."""
     mins = parse_slot_to_minutes(slot_str)
     return mins if mins != 9999 else None
+
+# ---------------------------------------------------------------------
+# OPD 3-SESSION TIMETABLE (30-MIN INTERVALS) & DYNAMIC ML SLOT BUFFERS
+# ---------------------------------------------------------------------
+OPD_SCHEDULE_SESSIONS = {
+    "morning": {
+        "title": "Morning Session (09:30 AM - 01:00 PM)",
+        "slots": ["09:30 AM", "10:00 AM", "10:30 AM", "11:00 AM", "11:30 AM", "12:00 PM", "12:30 PM"]
+    },
+    "afternoon": {
+        "title": "Afternoon Session (02:30 PM - 05:30 PM)",
+        "slots": ["02:30 PM", "03:00 PM", "03:30 PM", "04:00 PM", "04:30 PM", "05:00 PM"]
+    },
+    "evening": {
+        "title": "Evening Session (06:30 PM - 08:00 PM)",
+        "slots": ["06:30 PM", "07:00 PM", "07:30 PM"]
+    }
+}
+
+ALL_STANDARD_SLOTS = [
+    slot for sess in OPD_SCHEDULE_SESSIONS.values() for slot in sess["slots"]
+]
+
+def minutes_to_slot_str(mins: int) -> str:
+    """Converts minutes from midnight to 12-hour formatted time string like '11:20 AM'."""
+    hours = (mins // 60) % 24
+    m = mins % 60
+    period = "AM" if hours < 12 else "PM"
+    display_hour = hours if hours <= 12 else hours - 12
+    if display_hour == 0:
+        display_hour = 12
+    return f"{display_hour:02d}:{m:02d} {period}"
+
+def estimate_appointment_duration(
+    doctor: Optional[Doctor] = None,
+    symptoms: Optional[str] = None,
+    patient_age: Optional[Union[int, str]] = None
+) -> int:
+    """
+    Estimates consultation duration based on symptoms severity & complexity,
+    doctor's specialty/speed, and patient age.
+    Minimum slot duration is 30 minutes.
+    Complex/Cardiac/Trauma cases expand to 45-50+ minutes, dynamically blocking overlapping 30m slots.
+    """
+    base_duration = 30
+    if not symptoms:
+        return base_duration
+
+    s = symptoms.lower()
+
+    # High complexity: Cardiac, neurological, respiratory distress, acute trauma
+    high_complexity_pattern = r'chest|angina|cardiac|heart|palpitat|ecg|breathless|shortness of breath|dyspnea|stroke|paralysis|unconscious|seizure|fracture|trauma|severe pain'
+    if re.search(high_complexity_pattern, s):
+        base_duration = 50
+    elif re.search(r'chronic|diabetes|hypertension|migraine|vertigo|joint pain|arthritis|swelling|edema|wheez|asthma|ulcer|gastritis', s):
+        base_duration = 40
+    else:
+        base_duration = 30
+
+    # Age vulnerability adjustment (geriatric >= 65, pediatric infant <= 5)
+    if patient_age is not None:
+        try:
+            age = int(patient_age)
+            if (age >= 65 or age <= 5) and base_duration >= 40:
+                base_duration = min(60, base_duration + 10)
+        except (ValueError, TypeError):
+            pass
+
+    return max(30, base_duration)
+
+def get_doctor_busy_windows(
+    session: Session,
+    doctor_id: int,
+    appointment_date: str,
+    ignore_appointment_id: Optional[int] = None
+) -> List[Dict]:
+    """Retrieves all active busy time intervals for doctor on specific date."""
+    query = select(Appointment).where(
+        Appointment.doctor_id == doctor_id,
+        Appointment.appointment_date == appointment_date,
+        Appointment.status.in_(["pending", "serving"])
+    )
+    if ignore_appointment_id:
+        query = query.where(Appointment.id != ignore_appointment_id)
+
+    appts = session.exec(query).all()
+    windows = []
+    for appt in appts:
+        s_mins = parse_slot_to_minutes(appt.time_slot)
+        if s_mins >= 9999:
+            continue
+        dur = max(30, appt.predicted_duration or 30)
+        e_mins = s_mins + dur
+        windows.append({
+            "appointment_id": appt.id,
+            "slot": appt.time_slot,
+            "start_mins": s_mins,
+            "end_mins": e_mins,
+            "duration": dur,
+            "patient_name": appt.beneficiary_name or "Reserved Patient",
+            "busy_until": minutes_to_slot_str(e_mins)
+        })
+    return windows
+
 
 def get_sorted_doctor_appointments(
     session: Session,
@@ -369,6 +474,97 @@ def list_doctors(department_id: int = None):
                 )
             )
         return result
+
+@app.get("/doctors/{doctor_id}/available-slots", response_model=DoctorAvailableSlotsResponse)
+def get_doctor_available_slots(
+    doctor_id: int,
+    date: Optional[str] = None
+):
+    """
+    Returns live dynamic OPD slot availability for a doctor on a specific date.
+    Calculates ML extended consultation buffers (e.g. 50-minute consultations)
+    and dynamically marks colliding slots as unavailable with exact reasoning
+    (e.g., 'Extended Consultation Buffer (10:30 AM - 11:20 AM)').
+    """
+    now_ist = datetime.now(IST)
+    today_ist = now_ist.strftime("%Y-%m-%d")
+    target_date = date or today_ist
+    curr_mins = now_ist.hour * 60 + now_ist.minute if target_date == today_ist else -1
+
+    with Session(engine) as session:
+        doctor = session.get(Doctor, doctor_id)
+        if not doctor:
+            raise HTTPException(status_code=404, detail="Doctor not found")
+        
+        dept = session.get(Department, doctor.department_id)
+        dept_name = dept.name if dept else "General Medicine"
+
+        busy_windows = get_doctor_busy_windows(session, doctor_id, target_date)
+
+        all_items: List[AvailableSlotItem] = []
+        sessions_dict: Dict[str, List[AvailableSlotItem]] = {
+            "morning": [],
+            "afternoon": [],
+            "evening": []
+        }
+
+        next_avail = None
+
+        for session_key, session_meta in OPD_SCHEDULE_SESSIONS.items():
+            for slot in session_meta["slots"]:
+                c_start = parse_slot_to_minutes(slot)
+                c_end = c_start + 30
+                is_past = False
+                is_available = True
+                reason = None
+                busy_until = None
+
+                # Check past slot for today
+                if target_date == today_ist and c_start <= curr_mins + 15:
+                    is_past = True
+                    is_available = False
+                    reason = "Slot Passed"
+
+                # Check collision with busy windows
+                if is_available:
+                    for bw in busy_windows:
+                        if c_start < bw["end_mins"] and c_end > bw["start_mins"]:
+                            is_available = False
+                            busy_until = bw["busy_until"]
+                            if c_start == bw["start_mins"]:
+                                reason = f"Booked ({bw['slot']})"
+                            else:
+                                reason = f"Extended Consultation Buffer ({bw['slot']} - {bw['busy_until']})"
+                            break
+
+                item = AvailableSlotItem(
+                    slot=slot,
+                    session=session_key,
+                    available=is_available,
+                    is_past=is_past,
+                    reason=reason,
+                    busy_until=busy_until,
+                    predicted_duration=30
+                )
+                sessions_dict[session_key].append(item)
+                all_items.append(item)
+
+                if is_available and next_avail is None:
+                    next_avail = slot
+
+        avail_count = sum(1 for item in all_items if item.available)
+
+        return DoctorAvailableSlotsResponse(
+            doctor_id=doctor.id,
+            doctor_name=doctor.name,
+            department=dept_name,
+            date=target_date,
+            total_slots=len(all_items),
+            available_count=avail_count,
+            next_available_slot=next_avail,
+            sessions=sessions_dict,
+            all_slots=all_items,
+        )
 
 # ---------------------------------------------------------------------
 # SYMPTOM MAPPING
@@ -1620,6 +1816,7 @@ def frontend_register(request: FrontendRegisterRequest):
             ).all()
         )
 
+        pred_dur = estimate_appointment_duration(doctor, getattr(request, 'symptoms', None), 30)
         appointment = Appointment(
             patient_id=patient.id,
             doctor_id=doc_id,
@@ -1628,6 +1825,8 @@ def frontend_register(request: FrontendRegisterRequest):
             queue_position=existing_count + 1,
             time_slot=chosen_slot,
             appointment_date=chosen_date,
+            predicted_duration=pred_dur,
+            symptoms=getattr(request, 'symptoms', None) or "Routine consultation",
         )
         session.add(appointment)
         session.commit()
@@ -1773,6 +1972,48 @@ def book_patient_appointment(
             beneficiary_gender = req.patient_gender or req.beneficiary_gender or "Male"
             contact_phone = req.contact_phone or patient.phone
 
+            # Dynamic ML-Driven Slot Buffer Collision Guard
+            cand_start = parse_slot_to_minutes(chosen_slot)
+            cand_end = cand_start + 30
+            busy_windows = get_doctor_busy_windows(session, doctor.id, chosen_date)
+            for bw in busy_windows:
+                if cand_start < bw["end_mins"] and cand_end > bw["start_mins"]:
+                    suggested = None
+                    # First check for the immediate next slot following the doctor's consultation
+                    for s_cand in ALL_STANDARD_SLOTS:
+                        s_start = parse_slot_to_minutes(s_cand)
+                        s_end = s_start + 30
+                        if s_start < bw["end_mins"]:
+                            continue
+                        if chosen_date == today_ist:
+                            curr_mins = now_ist.hour * 60 + now_ist.minute
+                            if s_start <= curr_mins + 15:
+                                continue
+                        if not any(s_start < bwi["end_mins"] and s_end > bwi["start_mins"] for bwi in busy_windows):
+                            suggested = s_cand
+                            break
+                    if not suggested:
+                        # Fallback to any remaining available slot on that date
+                        for s_cand in ALL_STANDARD_SLOTS:
+                            s_start = parse_slot_to_minutes(s_cand)
+                            s_end = s_start + 30
+                            if chosen_date == today_ist:
+                                curr_mins = now_ist.hour * 60 + now_ist.minute
+                                if s_start <= curr_mins + 15:
+                                    continue
+                            if not any(s_start < bwi["end_mins"] and s_end > bwi["start_mins"] for bwi in busy_windows):
+                                suggested = s_cand
+                                break
+                    if cand_start == bw["start_mins"]:
+                        msg = f"Slot {chosen_slot} is already reserved for {doctor.name}."
+                    else:
+                        msg = f"{doctor.name} is in an extended consultation ({bw['slot']} - {bw['busy_until']})."
+                    rec = f" Next available slot: {suggested}." if suggested else " No further open slots today."
+                    raise HTTPException(
+                        status_code=status.HTTP_409_CONFLICT,
+                        detail=f"{msg}{rec}"
+                    )
+
             # Idempotency / Duplicate Booking Guard
             if is_dep:
                 dep_clean_name = (beneficiary_name or "").strip().lower()
@@ -1820,6 +2061,7 @@ def book_patient_appointment(
                 ).all()
             )
 
+            pred_dur = estimate_appointment_duration(doctor, req.symptoms, beneficiary_age)
             appointment = Appointment(
                 patient_id=patient.id,
                 doctor_id=doctor.id,
@@ -1833,6 +2075,8 @@ def book_patient_appointment(
                 beneficiary_gender=beneficiary_gender,
                 contact_phone=contact_phone,
                 is_dependent=is_dep,
+                predicted_duration=pred_dur,
+                symptoms=req.symptoms or "Routine consultation",
             )
             session.add(appointment)
             session.commit()
@@ -1916,6 +2160,8 @@ def book_patient_appointment(
                 contact_phone=contact_phone,
                 is_dependent=is_dep,
                 is_arrived=appointment.is_arrived,
+                predicted_duration=appointment.predicted_duration,
+                symptoms=appointment.symptoms,
                 patient=patient_payload,
             )
     except HTTPException:
@@ -3477,7 +3723,45 @@ def register_walkin_patient(req: StaffWalkInRegisterRequest, _staff: dict = Depe
         dept_name = dept.name if dept else "General Medicine"
         meta = DOCTOR_METADATA.get(doctor.name, {}) if doctor else {}
 
-        # 3. Create Appointment
+        # 3. Collision check & Create Appointment
+        cand_start = parse_slot_to_minutes(chosen_slot)
+        cand_end = cand_start + 30
+        busy_windows = get_doctor_busy_windows(session, doc_id, today_ist)
+        for bw in busy_windows:
+            if cand_start < bw["end_mins"] and cand_end > bw["start_mins"]:
+                suggested = None
+                for s_cand in ALL_STANDARD_SLOTS:
+                    s_start = parse_slot_to_minutes(s_cand)
+                    s_end = s_start + 30
+                    if s_start < bw["end_mins"]:
+                        continue
+                    curr_mins = now_ist.hour * 60 + now_ist.minute
+                    if s_start <= curr_mins + 10:
+                        continue
+                    if not any(s_start < bwi["end_mins"] and s_end > bwi["start_mins"] for bwi in busy_windows):
+                        suggested = s_cand
+                        break
+                if not suggested:
+                    for s_cand in ALL_STANDARD_SLOTS:
+                        s_start = parse_slot_to_minutes(s_cand)
+                        s_end = s_start + 30
+                        curr_mins = now_ist.hour * 60 + now_ist.minute
+                        if s_start <= curr_mins + 10:
+                            continue
+                        if not any(s_start < bwi["end_mins"] and s_end > bwi["start_mins"] for bwi in busy_windows):
+                            suggested = s_cand
+                            break
+                if cand_start == bw["start_mins"]:
+                    msg = f"Slot {chosen_slot} is already reserved for {doctor.name}."
+                else:
+                    msg = f"{doctor.name} is in an extended consultation ({bw['slot']} - {bw['busy_until']})."
+                rec = f" Suggested next slot: {suggested}." if suggested else ""
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail=f"{msg}{rec}"
+                )
+
+        pred_dur = estimate_appointment_duration(doctor, req.symptoms, req.age)
         appointment = Appointment(
             patient_id=patient.id,
             doctor_id=doc_id,
@@ -3491,6 +3775,8 @@ def register_walkin_patient(req: StaffWalkInRegisterRequest, _staff: dict = Depe
             beneficiary_gender=req.gender or "Male",
             contact_phone=clean_phone,
             is_dependent=False,
+            predicted_duration=pred_dur,
+            symptoms=req.symptoms or "Walk-in OPD Consultation",
         )
         session.add(appointment)
         session.commit()
@@ -3543,6 +3829,8 @@ def register_walkin_patient(req: StaffWalkInRegisterRequest, _staff: dict = Depe
             patientsAhead=patients_ahead,
             estimatedWaitMinutes=est_wait,
             booked_time=now_ist.strftime("%I:%M %p"),
+            predicted_duration=appointment.predicted_duration,
+            symptoms=appointment.symptoms,
         )
 
 

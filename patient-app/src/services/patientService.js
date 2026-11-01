@@ -67,6 +67,17 @@ export const patientService = {
     return res;
   },
 
+  // Fetches live dynamic slot availability for a doctor on a specific date
+  async getAvailableSlots(doctorId, date) {
+    try {
+      const url = `/doctors/${doctorId}/available-slots?date=${encodeURIComponent(date)}`;
+      return await api.get(url);
+    } catch (err) {
+      console.warn("Fetch available slots API fallback:", err);
+      return null;
+    }
+  },
+
   // Loads the authenticated profile or returns null.
   async getProfile() {
     try {

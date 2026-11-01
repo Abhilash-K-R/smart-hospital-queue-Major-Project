@@ -106,6 +106,8 @@ class Appointment(SQLModel, table=True):
     contact_phone: Optional[str] = Field(default=None)
     is_dependent: bool = Field(default=False)
     is_arrived: bool = Field(default=False)
+    predicted_duration: Optional[int] = Field(default=30)
+    symptoms: Optional[str] = Field(default=None)
 
 class QueueLog(SQLModel, table=True):
     """
