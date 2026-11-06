@@ -676,36 +676,41 @@ def auto_expire_past_appointments(session: Session) -> int:
 @app.get("/appointments/me", response_model=List[AppointmentResponse])
 @app.get("/appointments/my", response_model=List[AppointmentResponse])
 def get_my_appointments(
-    current_user: Optional[dict] = Depends(get_optional_current_user),
+    current_user: dict = Depends(get_current_user),
     phone: Optional[str] = None,
     patient_id: Optional[int] = None
 ):
     """
     Returns the patient's own appointments enriched with doctor name,
     department, room number, token number, and live queue position.
-    Supports JWT Bearer auth or phone/patient_id lookup.
+    Strictly authenticated:
+      - Patients receive ONLY their own appointments.
+      - Staff/Admin roles may lookup appointments by phone or patient_id.
     """
     with Session(engine) as session:
         # Run automatic end-of-day / past slot expiration check
         auto_expire_past_appointments(session)
 
-        resolved_patient_id = None
-        if current_user and "sub" in current_user:
-            try:
-                resolved_patient_id = int(current_user["sub"])
-            except ValueError:
-                pass
+        role = (current_user.get("role") or "").lower()
+        caller_id = current_user.get("sub")
         
-        if not resolved_patient_id and phone:
-            p = session.exec(select(Patient).where(Patient.phone == phone.strip())).first()
-            if p:
-                resolved_patient_id = p.id
-                
-        if not resolved_patient_id and patient_id:
-            resolved_patient_id = patient_id
+        resolved_patient_id = None
+        if caller_id:
+            try:
+                resolved_patient_id = int(caller_id)
+            except ValueError:
+                resolved_patient_id = None
+
+        # Staff can look up appointments by phone or patient_id; regular patients cannot spoof or harvest
+        if role in ["staff", "admin", "receptionist", "doctor"]:
+            if phone:
+                p = session.exec(select(Patient).where(Patient.phone == phone.strip())).first()
+                if p:
+                    resolved_patient_id = p.id
+            elif patient_id:
+                resolved_patient_id = patient_id
 
         if not resolved_patient_id:
-            # If completely unauthenticated and no phone/id provided, return empty list
             return []
 
         appointments = session.exec(
@@ -767,10 +772,11 @@ def get_my_appointments(
 
 
 @app.post("/appointments/{token_or_id}/cancel")
-def cancel_appointment(token_or_id: str, current_user: Optional[dict] = Depends(get_optional_current_user)):
+def cancel_appointment(token_or_id: str, current_user: dict = Depends(get_current_user)):
     """
     Cancels an appointment by ID (e.g. '12') or Token Number (e.g. 'OPD-012').
     Verifies that caller owns the appointment or has staff privileges (IDOR protection).
+    Requires valid authentication.
     """
     clean_id_str = token_or_id.upper().replace("OPD-", "").strip()
     try:
@@ -783,12 +789,11 @@ def cancel_appointment(token_or_id: str, current_user: Optional[dict] = Depends(
         if not appointment:
             raise HTTPException(status_code=404, detail="Appointment not found")
 
-        if current_user:
-            role = (current_user.get("role") or "").lower()
-            caller_id = current_user.get("sub")
-            if role not in ["staff", "admin", "receptionist", "doctor"]:
-                if caller_id and appointment.patient_id and int(caller_id) != appointment.patient_id:
-                    raise HTTPException(status_code=403, detail="Forbidden: You are not authorized to cancel this appointment")
+        role = (current_user.get("role") or "").lower()
+        caller_id = current_user.get("sub")
+        if role not in ["staff", "admin", "receptionist", "doctor"]:
+            if not caller_id or not appointment.patient_id or int(caller_id) != appointment.patient_id:
+                raise HTTPException(status_code=403, detail="Forbidden: You are not authorized to cancel this appointment")
 
         appointment.status = "cancelled"
         appointment.queue_position = None
@@ -805,10 +810,11 @@ def cancel_appointment(token_or_id: str, current_user: Optional[dict] = Depends(
 
 
 @app.post("/appointments/{token_or_id}/arrive")
-def arrive_appointment(token_or_id: str, current_user: Optional[dict] = Depends(get_optional_current_user)):
+def arrive_appointment(token_or_id: str, current_user: dict = Depends(get_current_user)):
     """
     Marks the patient as arrived at the hospital.
     Verifies ownership or staff privileges (IDOR protection).
+    Requires valid authentication.
     """
     clean_id_str = token_or_id.upper().replace("OPD-", "").strip()
     try:
@@ -821,12 +827,11 @@ def arrive_appointment(token_or_id: str, current_user: Optional[dict] = Depends(
         if not appointment:
             raise HTTPException(status_code=404, detail="Appointment not found")
 
-        if current_user:
-            role = (current_user.get("role") or "").lower()
-            caller_id = current_user.get("sub")
-            if role not in ["staff", "admin", "receptionist", "doctor"]:
-                if caller_id and appointment.patient_id and int(caller_id) != appointment.patient_id:
-                    raise HTTPException(status_code=403, detail="Forbidden: You are not authorized to update this appointment")
+        role = (current_user.get("role") or "").lower()
+        caller_id = current_user.get("sub")
+        if role not in ["staff", "admin", "receptionist", "doctor"]:
+            if not caller_id or not appointment.patient_id or int(caller_id) != appointment.patient_id:
+                raise HTTPException(status_code=403, detail="Forbidden: You are not authorized to update this appointment")
 
         appointment.is_arrived = True
         session.add(appointment)
@@ -1479,9 +1484,6 @@ def request_forgot_password_otp(request: ForgotPasswordRequest):
             resp_otp = None
         elif os.getenv("ENVIRONMENT") == "testing" or os.getenv("DEMO_MODE", "false").lower() == "true":
             resp_otp = secure_otp
-        elif clean_phone in ["9876543210", "9999999999"]:
-            resp_otp = "123456"
-            OTP_CACHE[clean_phone]["otp"] = "123456"
 
         return ForgotPasswordResponse(
             success=True,
@@ -1494,7 +1496,7 @@ def request_forgot_password_otp(request: ForgotPasswordRequest):
 def reset_forgot_password(request: ForgotPasswordResetRequest):
     """
     Step 2 of Forgot Password flow:
-    Verifies virtual OTP (123456), enforces min 6 character password, hashes with bcrypt and updates DB.
+    Verifies virtual OTP, enforces min 6 character password, hashes with bcrypt and updates DB.
     """
     clean_phone = re.sub(r"\D", "", str(request.phone or ""))
     if len(clean_phone) > 10 and clean_phone.startswith("91"):
@@ -1505,24 +1507,21 @@ def reset_forgot_password(request: ForgotPasswordResetRequest):
     clean_otp = str(request.otp or "").strip()
     cached = OTP_CACHE.get(clean_phone)
     if not cached:
-        if clean_phone in ["9876543210", "9999999999"] and clean_otp == "123456":
-            pass
-        else:
-            raise HTTPException(status_code=400, detail="No active password reset request found or OTP expired. Please request a new OTP.")
-    else:
-        if time.time() > cached["expires_at"]:
-            del OTP_CACHE[clean_phone]
-            raise HTTPException(status_code=400, detail="OTP has expired. Please request a new OTP.")
-        
-        cached["attempts"] += 1
-        if cached["attempts"] > 3:
-            del OTP_CACHE[clean_phone]
-            raise HTTPException(status_code=429, detail="Too many invalid OTP attempts. Please request a new OTP.")
-        
-        if not hmac.compare_digest(cached["otp"], clean_otp):
-            raise HTTPException(status_code=400, detail="Invalid OTP code. Please check and try again.")
-        
+        raise HTTPException(status_code=400, detail="No active password reset request found or OTP expired. Please request a new OTP.")
+
+    if time.time() > cached["expires_at"]:
         del OTP_CACHE[clean_phone]
+        raise HTTPException(status_code=400, detail="OTP has expired. Please request a new OTP.")
+    
+    cached["attempts"] += 1
+    if cached["attempts"] > 3:
+        del OTP_CACHE[clean_phone]
+        raise HTTPException(status_code=429, detail="Too many invalid OTP attempts. Please request a new OTP.")
+    
+    if not hmac.compare_digest(cached["otp"], clean_otp):
+        raise HTTPException(status_code=400, detail="Invalid OTP code. Please check and try again.")
+    
+    del OTP_CACHE[clean_phone]
 
     if not request.newPassword or len(request.newPassword) < 6:
         raise HTTPException(status_code=400, detail="New password must be at least 6 characters long")
@@ -2145,21 +2144,21 @@ def create_patient_notification(
 def get_notifications(current_user: Optional[dict] = Depends(get_optional_current_user)):
     """
     In-app notification feed for Notifications.jsx and Navbar bell icon.
-    Returns persistent lifecycle events from database for authenticated patient or rich demo set.
+    Returns persistent lifecycle events from database for authenticated patient.
+    Unauthenticated callers receive an empty feed to prevent cross-patient data exposure.
     """
-    patient_id = None
-    if current_user and "sub" in current_user:
-        try:
-            patient_id = int(current_user["sub"])
-        except (ValueError, TypeError):
-            patient_id = None
+    if not current_user or "sub" not in current_user:
+        return []
+
+    try:
+        patient_id = int(current_user["sub"])
+    except (ValueError, TypeError):
+        return []
 
     with Session(engine) as session:
-        query = select(Notification)
-        if patient_id:
-            query = query.where(
-                (Notification.patient_id == patient_id) | (Notification.patient_id == None)
-            )
+        query = select(Notification).where(
+            (Notification.patient_id == patient_id) | (Notification.patient_id == None)
+        )
         
         db_notifs = session.exec(query.order_by(Notification.created_at.desc()).limit(20)).all()
 

@@ -85,8 +85,13 @@ def verify_staff_password(plain_password: str) -> bool:
     if configured_hash:
         return verify_password(plain_password, configured_hash)
 
-    # Fallback to configured staff default password or default secure staff password
-    expected_pass = os.getenv("STAFF_DEFAULT_PASSWORD", "Staff@123")
+    # Fallback to configured staff default password
+    expected_pass = os.getenv("STAFF_DEFAULT_PASSWORD")
+    if not expected_pass:
+        if os.getenv("ENVIRONMENT") == "production":
+            return False
+        expected_pass = "Staff@123"
+
     return hmac.compare_digest(plain_password.encode('utf-8'), expected_pass.encode('utf-8'))
 
 
@@ -161,18 +166,19 @@ def require_staff_user(
     """
     Guards admin & clinical operations endpoints.
     Enforces that caller has 'staff', 'admin', 'receptionist', or 'doctor' role.
-    In production: strictly rejects unauthenticated calls with 401.
+    FAIL-CLOSED: Strictly rejects unauthenticated calls unless explicit test flag is enabled.
     Rejects unauthorized access with 403 Forbidden.
     """
     if not credentials or not credentials.credentials:
-        if os.getenv("ENVIRONMENT") == "production":
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Authentication credentials required",
-                headers={"WWW-Authenticate": "Bearer"},
-            )
-        # Development / Testing fallback
-        return {"sub": "1", "role": "admin", "username": "system_admin"}
+        # Fail-closed by default. Only allow test bypass if explicitly enabled for local offline testing
+        if os.getenv("ALLOW_INSECURE_TEST_AUTH", "false").lower() == "true":
+            return {"sub": "1", "role": "admin", "username": "system_admin"}
+
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Authentication credentials required",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
 
     payload = verify_access_token(credentials.credentials)
     if payload is None:
