@@ -24,5 +24,5 @@ venv/
 scratch/
 create_latest_ppt.py
 database_migration_and_dev_scripts/
-paper test
-paper_test
+paper_test/
+paper test/
