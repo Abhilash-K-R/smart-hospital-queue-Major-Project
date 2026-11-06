@@ -208,18 +208,24 @@ app = FastAPI(title="Smart Hospital Queue & Arrival Optimization API")
 
 # Enable Cross-Origin Resource Sharing (CORS) so the React frontends
 # (running on localhost:3000, 5173, and Vercel production) can communicate with our API.
+# Production trusted origins
 trusted_origins = [
-    "http://localhost:3000",
-    "http://localhost:5173",
-    "http://localhost:5174",
-    "http://127.0.0.1:3000",
-    "http://127.0.0.1:5173",
-    "http://127.0.0.1:5174",
     "https://mediflow-patient-app.vercel.app",
     "https://mediflow-staff-dashboard.vercel.app",
     "https://smart-hospital-staff-dashboard.vercel.app",
     "https://smart-hospital-queue-major-project.vercel.app",
 ]
+
+# Only permit local loopback origins in non-production environments
+if os.getenv("ENVIRONMENT") != "production":
+    trusted_origins.extend([
+        "http://localhost:3000",
+        "http://localhost:5173",
+        "http://localhost:5174",
+        "http://127.0.0.1:3000",
+        "http://127.0.0.1:5173",
+        "http://127.0.0.1:5174",
+    ])
 env_origins = os.getenv("ALLOWED_ORIGINS", "")
 if env_origins:
     for o in env_origins.split(","):
@@ -437,37 +443,38 @@ def create_appointment(
             )
 
     with Session(engine) as session:
-        # If not resolved via JWT token, fall back gracefully to phone/request info
+        # If not resolved via JWT token, resolve by valid phone number or explicit verified patient ID
         if not patient_id:
-            lookup_phone = (request.phone or request.contact_phone or "").strip()
-            if lookup_phone:
-                p = session.exec(select(Patient).where(Patient.phone == lookup_phone)).first()
-                if p:
-                    patient_id = p.id
-            if not patient_id and request.patient_id:
+            raw_phone = re.sub(r"\D", "", str(request.phone or request.contact_phone or ""))
+            if len(raw_phone) > 10 and raw_phone.startswith("91"):
+                raw_phone = raw_phone[2:]
+            
+            if len(raw_phone) == 10:
+                p = session.exec(select(Patient).where(Patient.phone == raw_phone)).first()
+                if not p:
+                    p = Patient(
+                        name=(request.patient_name or "Patient").strip(),
+                        phone=raw_phone,
+                        email=request.email or f"{raw_phone}@mediflow.patient",
+                        password_hash=hash_password("Patient@123"),
+                    )
+                    session.add(p)
+                    session.commit()
+                    session.refresh(p)
+                patient_id = p.id
+            elif request.patient_id:
                 raw_pid = request.patient_id
                 pid_int = raw_pid if isinstance(raw_pid, int) else (int(re.findall(r'\d+', str(raw_pid))[0]) if re.findall(r'\d+', str(raw_pid)) else None)
                 if pid_int:
                     p = session.get(Patient, pid_int)
                     if p:
                         patient_id = p.id
-            # If still not found, create a patient record or find by name/phone
+
             if not patient_id:
-                fallback_name = request.patient_name or "Patient"
-                fallback_phone = lookup_phone or "9876543210"
-                p = session.exec(select(Patient).where(Patient.phone == fallback_phone)).first()
-                if not p:
-                    p = Patient(
-                        name=fallback_name,
-                        phone=fallback_phone,
-                        email=request.email or f"patient_{fallback_phone}@shridevimediflow.ai",
-                        hashed_password=hash_password("DemoPass@123"),
-                        role="patient"
-                    )
-                    session.add(p)
-                    session.commit()
-                    session.refresh(p)
-                patient_id = p.id
+                raise HTTPException(
+                    status_code=400,
+                    detail="Valid patient authentication or 10-digit contact phone number is required to book an appointment."
+                )
 
         doctor = resolve_doctor_from_request(session, request.doctor_id, request.doctor, request.department)
         if not doctor:
@@ -1705,18 +1712,27 @@ def book_patient_appointment(
                     pass
 
             if not patient:
-                # Fall back to first patient in database or create Laxuman G
-                patient = session.exec(select(Patient)).first()
-                if not patient:
-                    patient = Patient(
-                        name=req.patient_name or "Laxuman G",
-                        phone=req.phone or "9876543210",
-                        email=req.email or "laxuman.patient@mediflow.ai",
-                        password_hash=hash_password("Patient@123"),
+                raw_phone = re.sub(r"\D", "", str(req.phone or req.contact_phone or ""))
+                if len(raw_phone) > 10 and raw_phone.startswith("91"):
+                    raw_phone = raw_phone[2:]
+                
+                if len(raw_phone) == 10:
+                    patient = session.exec(select(Patient).where(Patient.phone == raw_phone)).first()
+                    if not patient:
+                        patient = Patient(
+                            name=(req.patient_name or "Walk-in Patient").strip(),
+                            phone=raw_phone,
+                            email=req.email or f"{raw_phone}@mediflow.patient",
+                            password_hash=hash_password("Patient@123"),
+                        )
+                        session.add(patient)
+                        session.commit()
+                        session.refresh(patient)
+                else:
+                    raise HTTPException(
+                        status_code=400,
+                        detail="Valid patient authentication or 10-digit contact phone number is required to book an appointment."
                     )
-                    session.add(patient)
-                    session.commit()
-                    session.refresh(patient)
 
             # Resolve Doctor
             doctor = resolve_doctor_from_request(session, req.doctor_id, req.doctor, req.department)
@@ -2237,31 +2253,44 @@ def get_notifications(current_user: Optional[dict] = Depends(get_optional_curren
 
 
 @app.put("/notifications/{notification_id}/read")
-def mark_notification_read(notification_id: int):
-    """Marks an in-app notification as read in database."""
+def mark_notification_read(
+    notification_id: int,
+    current_user: dict = Depends(get_current_user),
+):
+    """Marks an in-app notification as read in database with ownership check."""
+    caller_id = current_user.get("sub")
+    role = (current_user.get("role") or "").lower()
+
     with Session(engine) as session:
         notif = session.get(Notification, notification_id)
-        if notif:
-            notif.is_read = True
-            session.add(notif)
-            session.commit()
+        if not notif:
+            raise HTTPException(status_code=404, detail="Notification not found")
+
+        # Non-staff users can only mark their own notification as read
+        if role not in ["staff", "admin", "receptionist", "doctor"]:
+            if notif.patient_id and caller_id and int(caller_id) != notif.patient_id:
+                raise HTTPException(status_code=403, detail="Forbidden: You cannot modify this notification")
+
+        notif.is_read = True
+        session.add(notif)
+        session.commit()
     return {"success": True, "id": notification_id}
 
 
 @app.post("/notifications/mark-all-read")
-def mark_all_notifications_read(current_user: Optional[dict] = Depends(get_optional_current_user)):
+def mark_all_notifications_read(current_user: dict = Depends(get_current_user)):
     """Marks all notifications as read for current patient."""
-    patient_id = None
-    if current_user and "sub" in current_user:
-        try:
-            patient_id = int(current_user["sub"])
-        except (ValueError, TypeError):
-            patient_id = None
+    caller_id = current_user.get("sub")
+    if not caller_id:
+        raise HTTPException(status_code=401, detail="Authentication required")
+
+    patient_id = int(caller_id)
 
     with Session(engine) as session:
-        query = select(Notification).where(Notification.is_read == False)
-        if patient_id:
-            query = query.where(Notification.patient_id == patient_id)
+        query = select(Notification).where(
+            Notification.is_read == False,
+            (Notification.patient_id == patient_id) | (Notification.patient_id == None)
+        )
         unread_notifs = session.exec(query).all()
         for n in unread_notifs:
             n.is_read = True
@@ -2273,25 +2302,40 @@ def mark_all_notifications_read(current_user: Optional[dict] = Depends(get_optio
 @app.post("/notifications/dispatch-preview", response_model=DispatchNotificationResponse)
 def generate_dispatch_preview(
     req: DispatchNotificationRequest,
-    request: Request,
+    current_user: dict = Depends(get_current_user),
 ):
     """
     Generates dual-channel (WhatsApp + SMS) mobile dispatch notifications
     for Shridevi Hospital & Research Hospital, Tumakuru.
+    Enforces authorization to prevent patient PII leakage.
     """
+    caller_id = current_user.get("sub")
+    role = (current_user.get("role") or "").lower()
+
     with Session(engine) as session:
         appt = None
         if req.appointment_id:
             appt = session.get(Appointment, req.appointment_id)
-        
-        if not appt:
-            # Fallback to latest pending appointment
-            appt = session.exec(
-                select(Appointment).where(Appointment.status == "pending").order_by(Appointment.id.desc())
-            ).first()
+            if not appt:
+                raise HTTPException(status_code=404, detail="Appointment not found")
 
-        if not appt:
-            appt = session.exec(select(Appointment).order_by(Appointment.id.desc())).first()
+            # Ownership check: Patients can only preview their own appointment
+            if role not in ["staff", "admin", "receptionist", "doctor"]:
+                if not caller_id or not appt.patient_id or int(caller_id) != appt.patient_id:
+                    raise HTTPException(status_code=403, detail="Forbidden: You are not authorized to preview dispatch for this appointment")
+        else:
+            # If no appointment ID is passed, retrieve the authenticated user's active appointment
+            if role in ["staff", "admin", "receptionist", "doctor"]:
+                appt = session.exec(
+                    select(Appointment).where(Appointment.status == "pending").order_by(Appointment.id.desc())
+                ).first()
+            elif caller_id:
+                appt = session.exec(
+                    select(Appointment).where(
+                        Appointment.patient_id == int(caller_id),
+                        Appointment.status.in_(["pending", "serving"])
+                    ).order_by(Appointment.id.desc())
+                ).first()
 
         if not appt:
             raise HTTPException(status_code=404, detail="No active appointment found for dispatch")

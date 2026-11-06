@@ -111,8 +111,57 @@ def test_authenticated_staff_access():
     print("[PASS] test_authenticated_staff_access (Authorized 200 OK)")
 
 
+def test_unauthenticated_dispatch_preview_rejected():
+    """Verifies that dispatch preview cannot be accessed without authentication to prevent PII harvesting."""
+    res = client.post("/notifications/dispatch-preview", json={"appointment_id": 1})
+    assert res.status_code == 401, f"Expected 401 Unauthorized, got {res.status_code}: {res.text}"
+    print("[PASS] test_unauthenticated_dispatch_preview_rejected (401)")
+
+
+def test_cross_patient_dispatch_preview_forbidden():
+    """Verifies that an authenticated patient cannot harvest another patient's appointment details."""
+    with Session(engine) as session:
+        appt = session.exec(select(Appointment).where(Appointment.status == "pending")).first()
+        if not appt:
+            appt = session.exec(select(Appointment)).first()
+        if appt and appt.patient_id:
+            attacker_id = appt.patient_id + 9999
+            attacker_token = create_access_token({"sub": str(attacker_id), "role": "patient", "username": "Attacker"})
+            attacker_headers = {"Authorization": f"Bearer {attacker_token}"}
+            res = client.post("/notifications/dispatch-preview", json={"appointment_id": appt.id}, headers=attacker_headers)
+            assert res.status_code == 403, f"Expected 403 Forbidden, got {res.status_code}: {res.text}"
+            print("[PASS] test_cross_patient_dispatch_preview_forbidden (Blocked with 403 Forbidden)")
+
+
+def test_unauthenticated_mark_all_read_rejected():
+    """Verifies that unauthenticated callers cannot mass-clear hospital notification unread states."""
+    res = client.post("/notifications/mark-all-read")
+    assert res.status_code == 401, f"Expected 401 Unauthorized, got {res.status_code}: {res.text}"
+    print("[PASS] test_unauthenticated_mark_all_read_rejected (401)")
+
+
+def test_unauthenticated_mark_single_read_rejected():
+    """Verifies that individual notification state tampering requires authentication."""
+    res = client.put("/notifications/1/read")
+    assert res.status_code == 401, f"Expected 401 Unauthorized, got {res.status_code}: {res.text}"
+    print("[PASS] test_unauthenticated_mark_single_read_rejected (401)")
+
+
+def test_anonymous_empty_booking_rejected():
+    """Verifies that anonymous ghost bookings without valid phone or token are rejected."""
+    payload = {
+        "doctor_id": 1,
+        "date": "2026-11-10",
+        "time_slot": "11:00 AM"
+    }
+    res = client.post("/patients/book", json=payload)
+    assert res.status_code == 400, f"Expected 400 Bad Request, got {res.status_code}: {res.text}"
+    assert "Valid patient authentication or 10-digit contact phone number is required" in res.text
+    print("[PASS] test_anonymous_empty_booking_rejected (400 Bad Request)")
+
+
 if __name__ == "__main__":
-    print("\n--- RUNNING SECURITY REGRESSION TESTS ---")
+    print("\n--- RUNNING EXTENDED DEFENSIVE SECURITY REGRESSION TESTS ---")
     test_unauthenticated_appointment_cancel_rejected()
     test_unauthenticated_appointment_arrive_rejected()
     test_unauthenticated_appointments_me_rejected()
@@ -122,4 +171,9 @@ if __name__ == "__main__":
     test_patient_idor_prevention()
     test_authorized_patient_access()
     test_authenticated_staff_access()
-    print("\n[SUCCESS] ALL 9 DEFENSIVE SECURITY TESTS PASSED!\n")
+    test_unauthenticated_dispatch_preview_rejected()
+    test_cross_patient_dispatch_preview_forbidden()
+    test_unauthenticated_mark_all_read_rejected()
+    test_unauthenticated_mark_single_read_rejected()
+    test_anonymous_empty_booking_rejected()
+    print("\n[SUCCESS] ALL 14 DEFENSIVE SECURITY TESTS PASSED!\n")
