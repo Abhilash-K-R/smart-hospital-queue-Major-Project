@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { 
   Search, Filter, MoreVertical, Check, UserMinus, PhoneForwarded, RefreshCw, 
   AlertCircle, MessageSquare, Send, Smartphone, Trash2, UserPlus, X, Printer, 
-  Ticket, Clock, Stethoscope, CheckCircle2, QrCode
+  Ticket, Clock, Stethoscope, CheckCircle2, QrCode, Sparkles
 } from 'lucide-react';
 import api from '../services/api';
 import { announcePatientCall } from '../utils/audioAnnouncer';
@@ -44,6 +44,7 @@ const Queue = () => {
   const [isCallingNext, setIsCallingNext] = useState(false);
   const [updatingId, setUpdatingId] = useState(null);
   const [dispatchingId, setDispatchingId] = useState(null);
+  const [isSeedingDemo, setIsSeedingDemo] = useState(false);
 
   // Walk-in Registration Modal & Slip State
   const [isWalkInModalOpen, setIsWalkInModalOpen] = useState(false);
@@ -116,6 +117,21 @@ const Queue = () => {
       setActionMessage('Failed to reset queue for the day');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleSeedDemoQueue = async () => {
+    setIsSeedingDemo(true);
+    try {
+      const res = await api.post('/staff/queue/seed-demo');
+      setActionMessage(res.data?.message || 'Generated 20 demo patients across all doctors for live presentation.');
+      await fetchQueue();
+      setTimeout(() => setActionMessage(''), 5000);
+    } catch (err) {
+      console.error('Error generating demo queue:', err);
+      setActionMessage(`Failed to generate demo queue: ${err.response?.data?.detail || err.message}`);
+    } finally {
+      setIsSeedingDemo(false);
     }
   };
 
@@ -279,6 +295,16 @@ const Queue = () => {
           >
             <Trash2 className="h-3.5 w-3.5 text-slate-500 hover:text-red-600" />
             Clear Day
+          </button>
+
+          <button
+            onClick={handleSeedDemoQueue}
+            disabled={isSeedingDemo}
+            className="flex items-center gap-1.5 px-3.5 py-2 bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 text-white rounded-lg text-xs font-bold shadow-sm shadow-amber-500/20 transition-all cursor-pointer disabled:opacity-50"
+            title="Populate 20 time-aligned demo patients across all doctors for jury presentation"
+          >
+            <Sparkles className="h-3.5 w-3.5" />
+            {isSeedingDemo ? 'Generating...' : 'Demo'}
           </button>
         </div>
       </div>
