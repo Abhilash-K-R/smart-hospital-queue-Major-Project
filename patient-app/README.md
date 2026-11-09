@@ -1,7 +1,7 @@
 # 🏥 Shridevi MediFlow AI — Patient Web Application
 ### Shridevi Hospital & Research Hospital, Sira Road, Tumakuru - 572106
 
-The patient-facing web portal for **Shridevi MediFlow AI**, providing live OPD queue tracking, AI Random Forest wait-time predictions, Google Maps departure advice, and Dual-Channel (WhatsApp + SMS) mobile alerts.
+The patient-facing web portal for **Shridevi MediFlow AI**, providing live OPD queue tracking, AI Random Forest wait-time predictions, Google Maps departure advice, and Fast2SMS carrier mobile alerts.
 
 ---
 
@@ -10,7 +10,7 @@ The patient-facing web portal for **Shridevi MediFlow AI**, providing live OPD q
 - **OPD Appointment Booking:** Real-time doctor & specialty selection with live Neon PostgreSQL queue token generation (`OPD-xxx`).
 - **Digital Pass & PDF Export:** Printable digital appointment pass with QR code and hospital header.
 - **AI Smart Departure Engine:** Synchronizes live road travel duration with OPD queue wait to calculate the optimal leave-home time.
-- **Dual WhatsApp & SMS Alert Simulator:** Interactive smartphone mockup with real `wa.me` WhatsApp execution and 160-character GSM SMS previews.
+- **Fast2SMS Carrier Alert Simulator:** Interactive smartphone mockup with 160-character GSM SMS previews and single-credit delivery optimization.
 - **Live Queue Progression:** 30-second polling sync against FastAPI backend with voice announcements (Web Speech API).
 - **Multilingual Support:** English and Kannada language toggle.
 

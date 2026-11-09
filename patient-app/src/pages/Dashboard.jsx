@@ -204,7 +204,7 @@ export const Dashboard = () => {
               </div>
               <div className="flex justify-between items-center p-2.5 bg-slate-50 dark:bg-slate-900 rounded-xl">
                 <span className="text-slate-500 font-medium">Live Dispatch</span>
-                <span className="font-bold text-slate-900 dark:text-white">SMS & WhatsApp Alerts</span>
+                <span className="font-bold text-slate-900 dark:text-white">Fast2SMS Carrier Alerts</span>
               </div>
             </div>
           </div>

@@ -1310,7 +1310,7 @@ export const ArrivalPrediction = () => {
         </div>
       </div>
 
-      {/* Dual WhatsApp & SMS Dispatch Modal */}
+      {/* Carrier SMS Dispatch Modal */}
       <MobileDispatchModal
         isOpen={isDispatchModalOpen}
         onClose={() => setIsDispatchModalOpen(false)}

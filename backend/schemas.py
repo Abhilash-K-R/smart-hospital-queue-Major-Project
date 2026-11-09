@@ -376,7 +376,7 @@ class NotificationItem(BaseModel):
 
 class DispatchNotificationRequest(BaseModel):
     """
-    Request model for generating dual-channel (WhatsApp + SMS) mobile departure notifications.
+    Request model for generating carrier SMS mobile departure notifications.
     Supports previewing messages by appointment_id or explicit patient parameters.
     """
     appointment_id: Optional[int] = None
@@ -388,8 +388,8 @@ class DispatchNotificationRequest(BaseModel):
 
 class DispatchNotificationResponse(BaseModel):
     """
-    Response model containing synchronized WhatsApp and SMS notification templates,
-    one-click WhatsApp web/app share URL, and navigation metadata.
+    Response model containing Fast2SMS carrier SMS notification template,
+    departure recommendation, and navigation metadata.
     """
     success: bool = True
     appointment_id: int
@@ -403,11 +403,11 @@ class DispatchNotificationResponse(BaseModel):
     predicted_wait_minutes: float
     should_leave_now: bool
     status_headline: str
-    whatsapp_text: str
     sms_text: str
-    whatsapp_share_url: str
     google_maps_url: str
     timestamp: str
+    whatsapp_text: Optional[str] = None
+    whatsapp_share_url: Optional[str] = None
 
 
 

@@ -64,7 +64,7 @@ const Header = ({ isCollapsed, toggleSidebar, toggleMobileSidebar }) => {
           {
             id: 'live-2',
             type: 'success',
-            title: 'Fast2SMS & WhatsApp Dispatch Connected',
+            title: 'Fast2SMS Carrier Dispatch Connected',
             message: 'Departure alert previews and carrier notifications are operational for Shridevi Hospital.',
             time: '5m ago',
             read: false

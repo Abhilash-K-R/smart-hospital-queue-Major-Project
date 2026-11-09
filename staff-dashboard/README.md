@@ -8,7 +8,7 @@ The staff and administration operations portal for **Shridevi Hospital**, provid
 - **Authentication:** Secure JWT login for receptionists, nurses, and hospital administrators.
 - **Live Queue Table:** Granular patient status actions ("Call Next", "Serve", "Complete", "Skip") with immediate database synchronization.
 - **Emergency Priority Intake:** Instant admission of acute emergency patients with automated Queue Position #1 assignment and downstream regular queue bumping.
-- **Doctor Disruption Buffering:** Real-time delay adjustments (+15m, +30m, On Break) dynamically propagating to patient departure algorithms and WhatsApp/SMS alerts.
+- **Doctor Disruption Buffering:** Real-time delay adjustments (+15m, +30m, On Break) dynamically propagating to patient departure algorithms and Fast2SMS carrier alerts.
 - **Post-Consultation Evaluation Logs:** ML model audit logs comparing predicted vs actual wait times (`queue_logs` table).
 - **AI Clinical Symptom Classifier:** Dynamic department-to-symptom mapping with percentage match confidence.
 

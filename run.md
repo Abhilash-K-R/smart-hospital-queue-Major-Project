@@ -76,7 +76,7 @@ npm run dev
 - **New Patient Registration:** [http://localhost:3000/register](http://localhost:3000/register) — Instant token issuing with doctor allocation.
 - **Live Queue Radar:** [http://localhost:3000/queue](http://localhost:3000/queue) — Live queue progression with auto-polling.
 - **AI Smart Departure Alarm:** [http://localhost:3000/arrival](http://localhost:3000/arrival) — Haversine travel time + Random Forest wait calculation to advise exact departure time.
-- **Dual WhatsApp & SMS Dispatch:** [http://localhost:3000/notifications](http://localhost:3000/notifications) — Live mobile simulator and 1-click real WhatsApp alert dispatch.
+- **Carrier SMS & Alert Hub:** [http://localhost:3000/notifications](http://localhost:3000/notifications) — Live mobile simulator and carrier SMS alert preview.
 - **AI Symptom Checker:** [http://localhost:3000/symptoms](http://localhost:3000/symptoms) — Intelligent department routing based on medical complaints.
 
 ### 🏥 Staff & Doctor Dashboard (`http://localhost:5173` — Shridevi Hospital Admin)
@@ -92,7 +92,7 @@ npm run dev
 Follow this sequence to deliver an impressive demonstration to evaluators:
 
 ```
-[1. Patient Books Slot] ──> [2. AI Calculates Wait & Departure] ──> [3. Dual WhatsApp/SMS Alert]
+[1. Patient Books Slot] ──> [2. AI Calculates Wait & Departure] ──> [3. Carrier Fast2SMS Alert]
                                                                               │
 [5. Queue Logged to DB] <── [4. Staff Manages Live Queue / EMG] <─────────────┘
 ```
@@ -111,12 +111,11 @@ Follow this sequence to deliver an impressive demonstration to evaluators:
    - **Travel Engine (Distance & Traffic)**: Calculates travel time from patient's location to Shridevi Hospital, Sira Road campus.
 3. Show the **"Leave Home in X Minutes"** recommendation countdown.
 
-### Scene 3: Dual Mobile Alert Simulator (WhatsApp + SMS)
-1. Click **"WhatsApp & SMS Dispatch"** button on the Arrival Prediction page or open [http://localhost:3000/notifications](http://localhost:3000/notifications).
-2. Show the **Dual Channel Phone Simulator**:
-   - **WhatsApp Tab**: Displays rich verified OPD Bot message with token, doctor, room, wait time, and Google Maps hospital navigation link.
-   - **SMS Tab**: Displays concise GSM text message formatted for standard carrier networks (ensuring 100% notification reach).
-   - Click **"Send to Real WhatsApp"** (`wa.me/?text=...`) to demonstrate real external WhatsApp integration.
+### Scene 3: Fast2SMS Carrier Alert Simulator
+1. Click **"Carrier SMS Preview"** button on the Arrival Prediction page or open [http://localhost:3000/notifications](http://localhost:3000/notifications).
+2. Show the **Phone Simulator**:
+   - Displays official GSM text message formatted for Fast2SMS carrier networks (`VM-SHRIDEVI`), optimized for 1-credit delivery (< 140 chars) to ensure 100% reach even without smartphone internet.
+   - Click **"Test Web Push"** to demonstrate real browser push alerts.
 
 
 ### Scene 4: Emergency Triage Priority Insertion

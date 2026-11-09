@@ -137,18 +137,14 @@ const Queue = () => {
   const handleDispatchAlert = async (patient) => {
     setDispatchingId(patient.id);
     try {
-      const res = await api.post('/notifications/dispatch-preview', {
+      await api.post('/notifications/dispatch-preview', {
         appointment_id: patient.id,
         patient_name: patient.patient_name || patient.name,
         phone: patient.contact_phone || patient.phone || "9876543210",
         token_number: patient.tokenNumber
       });
       
-      const shareUrl = res.data?.whatsapp_share_url;
-      if (shareUrl) {
-        window.open(shareUrl, '_blank');
-      }
-      setActionMessage(`✅ WhatsApp & SMS departure alert dispatched to ${patient.patient_name || patient.name} (${patient.tokenNumber})`);
+      setActionMessage(`✅ Fast2SMS departure alert dispatched to ${patient.patient_name || patient.name} (${patient.tokenNumber})`);
       setTimeout(() => setActionMessage(''), 4000);
     } catch (err) {
       console.error("Error dispatching alert:", err);
@@ -382,10 +378,10 @@ const Queue = () => {
                       <button 
                         onClick={() => handleDispatchAlert(patient)}
                         disabled={dispatchingId === patient.id}
-                        className="px-2.5 py-1 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 rounded-lg text-xs font-semibold flex items-center gap-1 transition-colors border border-emerald-300 disabled:opacity-50"
-                        title="Dispatch Leave Now WhatsApp & SMS Alert to Patient Phone"
+                        className="px-2.5 py-1 bg-blue-50 text-blue-700 hover:bg-blue-100 rounded-lg text-xs font-semibold flex items-center gap-1 transition-colors border border-blue-300 disabled:opacity-50"
+                        title="Dispatch Leave Now Fast2SMS Alert to Patient Phone"
                       >
-                        <MessageSquare className="h-3.5 w-3.5 text-emerald-600" />
+                        <Smartphone className="h-3.5 w-3.5 text-blue-600" />
                         {dispatchingId === patient.id ? 'Sending...' : 'Alert Patient'}
                       </button>
 

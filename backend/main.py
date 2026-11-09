@@ -2657,7 +2657,7 @@ def generate_dispatch_preview(
     current_user: dict = Depends(get_current_user),
 ):
     """
-    Generates dual-channel (WhatsApp + SMS) mobile dispatch notifications
+    Generates carrier SMS mobile departure notifications via Fast2SMS
     for Shridevi Hospital & Research Hospital, Tumakuru.
     Enforces authorization to prevent patient PII leakage.
     """
@@ -2728,34 +2728,12 @@ def generate_dispatch_preview(
         token_str = f"OPD-{appt.id:03d}"
         maps_url = f"https://maps.google.com/?q={HOSPITAL_LAT},{HOSPITAL_LNG}"
 
-        # 1. WhatsApp Rich Text Format
-        whatsapp_text = (
-            f"🏥 *SHRIDEVI HOSPITAL, TUMAKURU*\n"
-            f"━━━━━━━━━━━━━━━━━━━━\n"
-            f"Dear *{pat_name}*,\n\n"
-            f"{'🚨 *YOUR APPOINTMENT IS APPROACHING — LEAVE NOW!*' if should_leave else 'ℹ️ *Smart OPD Queue Update*'}\n\n"
-            f"🎟️ *Token Number:* `{token_str}` (Queue Pos #{max(1, appt_pos)})\n"
-            f"👨‍⚕️ *Doctor:* {doc_name}\n"
-            f"🏢 *Department:* {dept_name} ({room_no})\n\n"
-            f"⏱️ *Estimated Travel Time:* {travel_time} mins\n"
-            f"⏳ *Remaining Wait Time:* {pred_wait} mins\n"
-            f"🚗 *AI Recommendation:* {'Leave home in 5-10 mins to avoid lounge waiting.' if should_leave else f'You can relax at home for ~{int(max(0, pred_wait - travel_time))} more minutes.'}\n\n"
-            f"📍 *Hospital Navigation:* {maps_url}\n"
-            f"📱 *Live Queue Tracker:* http://localhost:3000/queue\n\n"
-            f"_Shridevi Hospital & Research Hospital, Sira Road, Tumakuru_"
-        )
-
-        # 2. SMS Concise Text Format (Standard 160-char GSM SMS)
+        # Standard 160-char GSM carrier SMS format for Fast2SMS
         sms_text = (
             f"[Shridevi Hospital] {pat_name}, Token {token_str} (Dr. {doc_name.replace('Dr. ', '')}, {room_no}). "
             f"Travel: {travel_time}m, Wait: {pred_wait}m. {'LEAVE NOW' if should_leave else 'Wait at home'}. "
             f"Nav: maps.google.com/?q={HOSPITAL_LAT},{HOSPITAL_LNG}"
         )
-
-        # 3. WhatsApp click-to-chat URL
-        import urllib.parse
-        encoded_msg = urllib.parse.quote(whatsapp_text)
-        whatsapp_share_url = f"https://wa.me/?text={encoded_msg}"
 
         return DispatchNotificationResponse(
             success=True,
@@ -2770,11 +2748,11 @@ def generate_dispatch_preview(
             predicted_wait_minutes=pred_wait,
             should_leave_now=should_leave,
             status_headline=status_headline,
-            whatsapp_text=whatsapp_text,
             sms_text=sms_text,
-            whatsapp_share_url=whatsapp_share_url,
             google_maps_url=maps_url,
             timestamp=datetime.now(IST).strftime("%I:%M %p"),
+            whatsapp_text=None,
+            whatsapp_share_url=None,
         )
 
 

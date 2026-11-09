@@ -1021,7 +1021,7 @@ export const Appointment = () => {
               <Clock className="w-4 h-4" /> Zero-Lobby Waiting Protocol
             </div>
             <p className="text-xs text-slate-600 dark:text-slate-400 leading-relaxed">
-              Once booked, Shridevi MediFlow monitors live queue movement against your commute distance and issues a WhatsApp / SMS Leave-Now advisory so you arrive right on time.
+              Once booked, Shridevi MediFlow monitors live queue movement against your commute distance and issues a Fast2SMS Leave-Now carrier alert so you arrive right on time.
             </p>
           </div>
         </div>

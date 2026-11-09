@@ -1,7 +1,7 @@
 # 🏥 Shridevi MediFlow AI — Smart Hospital Queue Prediction and Patient Arrival Time Optimization System
 ### Shridevi Hospital & Research Hospital, Sira Road, Tumakuru - 572106
 
-AI-based system that predicts hospital wait times, sends proactive "leave now" dual WhatsApp & SMS alerts based on live travel time, and manages emergency patients in the OPD queue — built as a final-year major project (VTU) at SIET, Tumakuru.
+AI-based system that predicts hospital wait times, sends proactive "leave now" carrier SMS alerts based on live travel time, and manages emergency patients in the OPD queue — built as a final-year major project (VTU) at SIET, Tumakuru.
 
 **Guide:** Dr. Rajeswari R, Dept. of CSE, SIET Tumakuru  
 **Team:** Abhilash KR, Anjanadri TN, Laxuman, Naveen L  
@@ -12,7 +12,7 @@ AI-based system that predicts hospital wait times, sends proactive "leave now" d
 
 1. **Wait-Time Prediction (Machine Learning Engine):** Random Forest Regressor predicts how long a patient will wait based on live queue position, doctor consultation speeds, disruption delay buffers, day of week, and peak hours.
 2. **AI Smart Departure Advisor (Google Maps & Fast2SMS):** Continuously balances real-time road travel duration with a 10-minute safety buffer against predicted OPD wait times, automatically dispatching carrier SMS alerts via Fast2SMS when it is time to leave home to achieve a Zero-Wait arrival experience.
-3. **Automated & Dual-Channel Mobile Dispatch (Fast2SMS + WhatsApp):** Automatically triggers 1-credit GSM carrier SMS messages via Fast2SMS with idempotency tracking in PostgreSQL, alongside rich WhatsApp notifications with 1-click direction links.
+3. **Automated Carrier Mobile Dispatch (Fast2SMS):** Automatically triggers 1-credit GSM carrier SMS messages via Fast2SMS with idempotency tracking in PostgreSQL and real-time in-app notification streams.
 4. **Emergency Priority Queue Triage:** Hospital staff can immediately insert emergency walk-ins at Position #1 (`EMG-xxx`), dynamically bumping regular queues and recalculating downstream wait times in real-time.
 5. **Post-Consultation Evaluation Logging:** Live telemetry logs (`queue_logs` table in Neon Serverless PostgreSQL) tracking predicted vs actual consultation durations for model accuracy assessment.
 
