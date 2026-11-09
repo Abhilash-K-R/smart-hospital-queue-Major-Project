@@ -26,6 +26,7 @@ from typing import List, Optional, Dict, Any, Union
 import os
 import re
 import requests
+import random
 import uuid
 
 from travel_time import get_travel_time_minutes, get_ors_travel_details
@@ -3351,6 +3352,238 @@ def clear_today_queue(doctor_id: Optional[int] = None, _staff: dict = Depends(re
         "success": True,
         "cleared_appointments": cleared_count,
         "message": f"Successfully cleared {cleared_count} active appointments. Live OPD queue is now fresh and ready."
+    }
+
+
+
+@app.post("/staff/queue/seed-demo")
+def seed_demo_queue(_staff: dict = Depends(require_staff_user)):
+    """
+    Jury / Presentation Demonstration Seeder:
+    Generates a realistic, dynamic queue of 20 patients distributed across all 8 doctors
+    and 7 OPD departments (Cardiology, General Medicine, Orthopedics, Pediatrics, Neurology,
+    Dermatology, Pulmonology).
+
+    Time-Aware Alignment:
+    Calculates appointment time slots dynamically starting from the current real-world IST time onwards
+    (e.g., if clicked at 12:00 PM, slots begin at/after 12:00 PM), ensuring realistic 
+    presentation demonstrations before academic evaluation juries without past-dated entries.
+    """
+    now_ist = datetime.now(IST)
+    today_ist = now_ist.strftime("%Y-%m-%d")
+    curr_mins = now_ist.hour * 60 + now_ist.minute
+    # Round up to the nearest 5-minute mark for professional clinical scheduling
+    base_mins = ((curr_mins + 4) // 5) * 5
+
+    demo_specs = [
+        # Cardiology (Dr. Priya Sharma - ID 1) - 3 patients
+        {
+            "name": "Rajesh Kumar", "age": 54, "gender": "Male", "phone": "9845123401",
+            "symptoms": "Mild chest tightness and elevated blood pressure",
+            "doctor_id": 1, "offset_mins": 0, "status": "serving", "is_arrived": True, "is_critical": False
+        },
+        {
+            "name": "Sunita Devi", "age": 48, "gender": "Female", "phone": "9845123402",
+            "symptoms": "Palpitations and shortness of breath during exertion",
+            "doctor_id": 1, "offset_mins": 15, "status": "pending", "is_arrived": True, "is_critical": False
+        },
+        {
+            "name": "Amit Verma", "age": 39, "gender": "Male", "phone": "9845123403",
+            "symptoms": "Post-angioplasty routine clinical follow-up",
+            "doctor_id": 1, "offset_mins": 35, "status": "pending", "is_arrived": False, "is_critical": False
+        },
+
+        # General Medicine (Dr. Arjun Rao - ID 2) - 3 patients
+        {
+            "name": "Ramesh Patil", "age": 43, "gender": "Male", "phone": "9740112204",
+            "symptoms": "High viral fever, chills, and severe body aches",
+            "doctor_id": 2, "offset_mins": 0, "status": "pending", "is_arrived": True, "is_critical": False
+        },
+        {
+            "name": "Kavita Nair", "age": 32, "gender": "Female", "phone": "9740112205",
+            "symptoms": "Persistent migraine headache and nausea",
+            "doctor_id": 2, "offset_mins": 15, "status": "pending", "is_arrived": True, "is_critical": False
+        },
+        {
+            "name": "Mohammed Farooq", "age": 60, "gender": "Male", "phone": "9740112206",
+            "symptoms": "Type-2 Diabetes routine HbA1c and glucose review",
+            "doctor_id": 2, "offset_mins": 30, "status": "pending", "is_arrived": False, "is_critical": False
+        },
+
+        # General Medicine (Dr. Rajeswari R. - ID 3) - 3 patients
+        {
+            "name": "Deepa Hegde", "age": 29, "gender": "Female", "phone": "9880334407",
+            "symptoms": "Acute acid reflux, heartburn, and abdominal cramps",
+            "doctor_id": 3, "offset_mins": 0, "status": "pending", "is_arrived": True, "is_critical": False
+        },
+        {
+            "name": "Suresh Gowda", "age": 62, "gender": "Male", "phone": "9880334408",
+            "symptoms": "Chronic hypertension monitoring and fatigue",
+            "doctor_id": 3, "offset_mins": 15, "status": "pending", "is_arrived": False, "is_critical": False
+        },
+        {
+            "name": "Ananya Joshi", "age": 24, "gender": "Female", "phone": "9880334409",
+            "symptoms": "Chronic weakness and vitamin D3 deficiency checkup",
+            "doctor_id": 3, "offset_mins": 30, "status": "pending", "is_arrived": False, "is_critical": False
+        },
+
+        # Orthopedics (Dr. Vikram K. Rao - ID 4) - 3 patients
+        {
+            "name": "Venkatesh Iyer", "age": 66, "gender": "Male", "phone": "9900556610",
+            "symptoms": "Severe bilateral osteoarthritis knee joint pain",
+            "doctor_id": 4, "offset_mins": 0, "status": "pending", "is_arrived": True, "is_critical": False
+        },
+        {
+            "name": "Pooja Sharma", "age": 31, "gender": "Female", "phone": "9900556611",
+            "symptoms": "Acute lumbar spine spasm after gym workout",
+            "doctor_id": 4, "offset_mins": 20, "status": "pending", "is_arrived": True, "is_critical": False
+        },
+        {
+            "name": "Vijay Shetty", "age": 47, "gender": "Male", "phone": "9900556612",
+            "symptoms": "Right shoulder frozen rotator cuff stiffness",
+            "doctor_id": 4, "offset_mins": 40, "status": "pending", "is_arrived": False, "is_critical": False
+        },
+
+        # Pediatrics (Dr. Ananya Hegde - ID 5) - 2 patients
+        {
+            "name": "Aarav Sundaram", "age": 7, "gender": "Male", "phone": "9611223313",
+            "symptoms": "Acute tonsillitis, throat infection, and high fever",
+            "doctor_id": 5, "offset_mins": 0, "status": "pending", "is_arrived": True, "is_critical": False
+        },
+        {
+            "name": "Baby Diya", "age": 3, "gender": "Female", "phone": "9611223314",
+            "symptoms": "Scheduled developmental milestone and MMR vaccine",
+            "doctor_id": 5, "offset_mins": 20, "status": "pending", "is_arrived": False, "is_critical": False
+        },
+
+        # Neurology (Dr. Rajeshwar B. - ID 6) - 2 patients
+        {
+            "name": "Raghavendra Rao", "age": 57, "gender": "Male", "phone": "9844778815",
+            "symptoms": "Resting hand tremor and balance unsteadiness",
+            "doctor_id": 6, "offset_mins": 0, "status": "pending", "is_arrived": True, "is_critical": False
+        },
+        {
+            "name": "Shilpa Kulkarni", "age": 41, "gender": "Female", "phone": "9844778816",
+            "symptoms": "Refractory migraine with visual aura and photophobia",
+            "doctor_id": 6, "offset_mins": 25, "status": "pending", "is_arrived": False, "is_critical": False
+        },
+
+        # Dermatology (Dr. Sneha Patil - ID 7) - 2 patients
+        {
+            "name": "Meera Bhat", "age": 28, "gender": "Female", "phone": "9988112217",
+            "symptoms": "Acute allergic contact dermatitis with severe pruritus",
+            "doctor_id": 7, "offset_mins": 0, "status": "pending", "is_arrived": True, "is_critical": False
+        },
+        {
+            "name": "Chetan Deshmukh", "age": 36, "gender": "Male", "phone": "9988112218",
+            "symptoms": "Plaque psoriasis flare-up on elbows and scalp",
+            "doctor_id": 7, "offset_mins": 20, "status": "pending", "is_arrived": False, "is_critical": False
+        },
+
+        # Pulmonology (Dr. Manoj Kumar - ID 8) - 2 patients
+        {
+            "name": "Harish Reddy (Critical)", "age": 64, "gender": "Male", "phone": "9733445519",
+            "symptoms": "Severe acute asthma exacerbation with respiratory distress",
+            "doctor_id": 8, "offset_mins": 0, "status": "pending", "is_arrived": True, "is_critical": True
+        },
+        {
+            "name": "Suma Prasad", "age": 51, "gender": "Female", "phone": "9733445520",
+            "symptoms": "Post-viral persistent productive cough and dyspnea",
+            "doctor_id": 8, "offset_mins": 25, "status": "pending", "is_arrived": False, "is_critical": False
+        },
+    ]
+
+    with Session(engine) as session:
+        # 1. Clear any active pending or serving appointments to start clean
+        active_appts = session.exec(
+            select(Appointment).where(Appointment.status.in_(["pending", "serving"]))
+        ).all()
+        for appt in active_appts:
+            appt.status = "completed"
+            appt.queue_position = None
+            session.add(appt)
+        session.commit()
+
+        # Reset operational delays
+        doctor_delays.clear()
+
+        # 2. Get doctors map
+        all_docs = session.exec(select(Doctor)).all()
+        doc_map = {d.id: d for d in all_docs}
+
+        # 3. Batch fetch or create patients
+        phones = [spec["phone"] for spec in demo_specs]
+        existing_pts = {p.phone: p for p in session.exec(select(Patient).where(Patient.phone.in_(phones))).all()}
+
+        missing_specs = [s for s in demo_specs if s["phone"] not in existing_pts]
+        if missing_specs:
+            try:
+                max_curr = session.execute(text("SELECT COALESCE(MAX(CAST(patient_uid AS INTEGER)), 100500) FROM patient WHERE patient_uid ~ '^[0-9]+$';")).scalar() or 100500
+            except Exception:
+                max_curr = 100500
+
+            new_pts = []
+            for idx, s in enumerate(missing_specs):
+                clean_name = s["name"].replace(" (Critical)", "")
+                p = Patient(
+                    name=clean_name,
+                    phone=s["phone"],
+                    email=f"demo_{s['phone']}@hospital.com",
+                    password_hash="demo_hashed_pass",
+                    age=s["age"],
+                    gender=s["gender"],
+                    patient_uid=str(max_curr + 1 + idx),
+                )
+                session.add(p)
+                new_pts.append(p)
+            session.flush()
+            for p in new_pts:
+                existing_pts[p.phone] = p
+
+        created_count = 0
+        doctor_pos = {}
+
+        for i, spec in enumerate(demo_specs):
+            pat = existing_pts[spec["phone"]]
+            target_doc_id = spec["doctor_id"] if spec["doctor_id"] in doc_map else (all_docs[0].id if all_docs else 1)
+
+            # Assign position per doctor
+            if spec["status"] == "serving":
+                pos = 0
+            else:
+                doctor_pos[target_doc_id] = doctor_pos.get(target_doc_id, 0) + 1
+                pos = doctor_pos[target_doc_id]
+
+            slot_str = minutes_to_slot_str(base_mins + spec["offset_mins"])
+            booking_time = now_ist - timedelta(minutes=random.randint(8, 25))
+
+            new_appt = Appointment(
+                patient_id=pat.id,
+                doctor_id=target_doc_id,
+                booked_time=booking_time,
+                status=spec["status"],
+                queue_position=pos,
+                time_slot=slot_str,
+                appointment_date=today_ist,
+                beneficiary_name=spec["name"],
+                beneficiary_age=spec["age"],
+                beneficiary_gender=spec["gender"],
+                contact_phone=spec["phone"],
+                is_dependent=False,
+                is_arrived=spec["is_arrived"],
+                predicted_duration=20,
+                symptoms=spec["symptoms"],
+            )
+            session.add(new_appt)
+            created_count += 1
+
+        session.commit()
+
+    return {
+        "success": True,
+        "count": created_count,
+        "message": f"Successfully generated {created_count} demo patients across all 8 doctors starting from {minutes_to_slot_str(base_mins)}.",
+        "start_slot": minutes_to_slot_str(base_mins)
     }
 
 
