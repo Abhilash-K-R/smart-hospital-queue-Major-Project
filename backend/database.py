@@ -57,7 +57,7 @@ if DATABASE_URL:
 # pool_pre_ping=True automatically tests connections before use and reconnects if stale.
 # pool_recycle=300 refreshes connections every 5 minutes.
 connect_args = {
-    "connect_timeout": 15,
+    "connect_timeout": 30,
     "keepalives": 1,
     "keepalives_idle": 30,
     "keepalives_interval": 10,
