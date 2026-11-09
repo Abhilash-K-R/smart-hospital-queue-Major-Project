@@ -37,6 +37,10 @@ class Doctor(SQLModel, table=True):
     avg_consult_minutes: int
     is_present: bool = Field(default=True)
 
+    def get_effective_consult_time(self) -> int:
+        """Encapsulated business logic returning doctor's average consult duration in minutes."""
+        return self.avg_consult_minutes if self.avg_consult_minutes and self.avg_consult_minutes > 0 else 10
+
 
 class Patient(SQLModel, table=True):
     """
@@ -59,6 +63,16 @@ class Patient(SQLModel, table=True):
     emergency_contact_phone: Optional[str] = Field(default=None)
     allergies: Optional[str] = Field(default=None)
     updated_at: Optional[datetime] = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+    def get_masked_phone(self) -> str:
+        """Encapsulated privacy method: returns phone with first digits masked, e.g. '******3210'."""
+        if not self.phone or len(self.phone) < 4:
+            return "******"
+        return "*" * (len(self.phone) - 4) + self.phone[-4:]
+
+    def get_display_name(self) -> str:
+        """Returns clean display name for patient profile display."""
+        return self.name.strip() if self.name else "Patient"
 
 
 class SymptomMapping(SQLModel, table=True):
@@ -109,6 +123,21 @@ class Appointment(SQLModel, table=True):
     predicted_duration: Optional[int] = Field(default=30)
     symptoms: Optional[str] = Field(default=None)
 
+    def get_token_code(self) -> str:
+        """Encapsulated method returning formatted hospital token, e.g. 'OPD-012'."""
+        return f"OPD-{self.id:03d}" if self.id else "OPD-000"
+
+    def is_active(self) -> bool:
+        """Returns True if appointment is currently active in the queue lifecycle."""
+        return self.status in ["pending", "serving"]
+
+    def is_emergency(self) -> bool:
+        """Checks whether this appointment is an emergency triage case."""
+        slot = (self.time_slot or "").lower()
+        sym = (self.symptoms or "").lower()
+        return "emergency" in slot or "trauma" in slot or "critical" in sym or "chest pain" in sym
+
+
 class QueueLog(SQLModel, table=True):
     """
     Records the ML model's PREDICTED wait time vs the ACTUAL wait time
@@ -139,3 +168,7 @@ class Notification(SQLModel, table=True):
     severity: str = "info"  # 'success', 'info', 'warning', 'critical'
     is_read: bool = Field(default=False)
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+    def is_urgent(self) -> bool:
+        """Returns True if notification requires immediate patient attention."""
+        return self.severity in ["warning", "critical"] or self.type in ["emergency", "departure"]

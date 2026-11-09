@@ -64,20 +64,23 @@ connect_args = {
     "keepalives_count": 5,
 }
 
-# Ensure hostaddr is available if local DNS is unresponsive
+# Force direct IPv4 resolution to prevent Windows IPv6 connection timeouts to Neon
 try:
     if DATABASE_URL and "@" in DATABASE_URL:
         host_part = DATABASE_URL.split("@")[1].split("/")[0].split("?")[0]
         if ":" in host_part:
             host_part = host_part.split(":")[0]
         try:
-            socket.gethostbyname(host_part)
+            ipv4_addr = socket.gethostbyname(host_part)
+            if ipv4_addr and ":" not in ipv4_addr:
+                connect_args["hostaddr"] = ipv4_addr
         except Exception:
-            resolver = dns.resolver.Resolver()
-            resolver.nameservers = ['8.8.8.8', '1.1.1.1']
-            answers = resolver.resolve(host_part, 'A')
-            if answers:
-                connect_args["hostaddr"] = str(answers[0])
+            if HAS_DNS_RESOLVER:
+                resolver = dns.resolver.Resolver()
+                resolver.nameservers = ['8.8.8.8', '1.1.1.1']
+                answers = resolver.resolve(host_part, 'A')
+                if answers:
+                    connect_args["hostaddr"] = str(answers[0])
 except Exception:
     pass
 
