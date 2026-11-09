@@ -972,3 +972,4 @@ flowchart TD
 - **Staff Dashboard:** `http://localhost:5173` (Login: `staff@hospital.com` / `Staff@123`)
 - **Patient App:** `http://localhost:3000`
 - **Hospital Location:** Shridevi Hospital, Tumakuru (`13.376230, 77.097439`)
+
