@@ -1047,7 +1047,6 @@ export const Appointment = () => {
               </p>
               <p className="text-xs text-slate-500">{confirmedAppointment.department} • {confirmedAppointment.roomNo}</p>
             </div>
-
             <div className="p-4 bg-slate-50 dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 grid grid-cols-2 gap-3 text-left text-xs">
               <div className="col-span-2 pb-2 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between">
                 <div>
@@ -1083,7 +1082,6 @@ export const Appointment = () => {
                 <p className="font-bold text-emerald-600">{confirmedAppointment.estimatedWait}</p>
               </div>
             </div>
-
             {/* QR Code */}
             <div className="flex justify-center p-3 bg-white rounded-xl shadow-inner w-fit mx-auto border border-slate-200">
               <QRCodeSVG value={`SHRIDEVI-TOKEN:${confirmedAppointment.tokenNumber}`} size={110} />

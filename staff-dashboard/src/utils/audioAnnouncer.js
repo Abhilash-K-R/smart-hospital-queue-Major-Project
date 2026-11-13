@@ -55,7 +55,6 @@ export const announcePatientCall = (tokenNumber, roomNo = "Room 204", patientNam
       utterance.rate = 0.95; // Slightly slower, clear hospital pace
       utterance.pitch = 1.05;
       utterance.volume = 1.0;
-
       // Small delay after chime before speaking
       setTimeout(() => {
         window.speechSynthesis.speak(utterance);

@@ -64,33 +64,27 @@ connect_args = {
     "keepalives_count": 5,
 }
 
-# Force direct IPv4 resolution to prevent Windows IPv6 connection timeouts to Neon
-try:
-    if DATABASE_URL and "@" in DATABASE_URL:
-        host_part = DATABASE_URL.split("@")[1].split("/")[0].split("?")[0]
-        if ":" in host_part:
-            host_part = host_part.split(":")[0]
-        try:
-            ipv4_addr = socket.gethostbyname(host_part)
-            if ipv4_addr and ":" not in ipv4_addr:
-                connect_args["hostaddr"] = ipv4_addr
-        except Exception:
-            if HAS_DNS_RESOLVER:
-                resolver = dns.resolver.Resolver()
-                resolver.nameservers = ['8.8.8.8', '1.1.1.1']
-                answers = resolver.resolve(host_part, 'A')
-                if answers:
-                    connect_args["hostaddr"] = str(answers[0])
-except Exception:
-    pass
+# Note: Neon PostgreSQL requires SNI with the endpoint hostname.
+# Do NOT pass hostaddr for neon.tech as raw IPs cause TLS SNI handshake failure.
 
-engine = create_engine(
-    DATABASE_URL,
-    echo=False,
-    pool_pre_ping=True,
-    pool_recycle=60,
-    pool_size=10,
-    max_overflow=20,
-    connect_args=connect_args
-)
+is_render = os.getenv("RENDER") is not None or os.getenv("ENVIRONMENT") == "production"
+use_sqlite = not is_render and (os.getenv("USE_LOCAL_SQLITE", "true").lower() == "true" or not DATABASE_URL or DATABASE_URL.startswith("sqlite"))
+
+if use_sqlite:
+    db_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "hospital.db"))
+    engine = create_engine(
+        f"sqlite:///{db_path}",
+        echo=False,
+        connect_args={"check_same_thread": False}
+    )
+else:
+    engine = create_engine(
+        DATABASE_URL,
+        echo=False,
+        pool_pre_ping=True,
+        pool_recycle=60,
+        pool_size=10,
+        max_overflow=20,
+        connect_args=connect_args
+    )
 
