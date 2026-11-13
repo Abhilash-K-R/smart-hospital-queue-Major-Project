@@ -39,7 +39,6 @@ const Emergency = () => {
     setIsSubmitting(true);
     setError('');
     setSuccessData(null);
-
     try {
       const payload = {
         name,
@@ -53,7 +52,6 @@ const Emergency = () => {
         spo2: parseInt(spo2) || 98,
         temperature: parseFloat(temperature) || 37.0,
       };
-
       const res = await api.post('/staff/emergency-insert', payload);
       setSuccessData(res.data);
     } catch (err) {

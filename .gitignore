@@ -18,6 +18,7 @@ methodology_flowchart_diagram.jpg
 # Python & Environment artifacts
 __pycache__/
 *.py[cod]
+*.db
 .env
 venv/
 
@@ -27,3 +28,4 @@ create_latest_ppt.py
 database_migration_and_dev_scripts/
 paper_test/
 paper test/
+create_handbook.py
