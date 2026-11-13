@@ -29,3 +29,5 @@ database_migration_and_dev_scripts/
 paper_test/
 paper test/
 create_handbook.py
+PROJECT_MASTER_GUIDE.md
+generate_chapter_*.py
