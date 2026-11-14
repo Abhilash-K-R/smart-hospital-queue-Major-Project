@@ -1,4 +1,4 @@
-# 🏥 Shridevi MediFlow AI — Smart Hospital Queue Prediction and Patient Arrival Time Optimization System
+# 🏥 MediFlow — Smart Hospital Queue Prediction and Patient Arrival Time Optimization System
 ### Shridevi Hospital & Research Hospital, Sira Road, Tumakuru - 572106
 
 AI-based system that predicts hospital wait times, sends proactive "leave now" carrier SMS alerts based on live travel time, and manages emergency patients in the OPD queue — built as a final-year major project (VTU) at SIET, Tumakuru.
